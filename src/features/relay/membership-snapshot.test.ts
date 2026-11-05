@@ -255,3 +255,76 @@ describe("NIP-CL compact membership authority", () => {
     ).rejects.toThrow();
   });
 });
+
+test("refreshes capability per generation and after explicit fallback, without hiding failures", async () => {
+  const { readMembershipSnapshot } = await import("./membership-snapshot");
+  let discoveries = 0;
+  let info: unknown = { self: relay, membership_snapshot: descriptor };
+  let result = {
+    origin: binding.origin,
+    signer_pubkey: viewer,
+    request_id: requestId,
+    status: 200,
+    body: JSON.stringify(signed(await payload())),
+  };
+  const host = {
+    origin: binding.origin,
+    viewer,
+    relay,
+    async info() {
+      discoveries++;
+      return info;
+    },
+    async request() {
+      return result;
+    },
+  };
+  const signal = new AbortController().signal;
+  await expect(
+    readMembershipSnapshot(host, MEMBERSHIP_TYPES, signal),
+  ).resolves.toHaveProperty("channels", entries);
+  info = { self: relay };
+  await expect(
+    readMembershipSnapshot(host, MEMBERSHIP_TYPES, signal),
+  ).rejects.toBeInstanceOf(MembershipUnsupported);
+  info = { self: relay, membership_snapshot: descriptor };
+  result = { ...result, body: "[]" };
+  await expect(
+    readMembershipSnapshot(host, MEMBERSHIP_TYPES, signal),
+  ).rejects.toBeInstanceOf(MembershipUnsupported);
+  expect(discoveries).toBe(4);
+  result = {
+    ...result,
+    status: 404,
+    body: JSON.stringify({ error: "membership_snapshot unsupported" }),
+  };
+  await expect(
+    readMembershipSnapshot(host, MEMBERSHIP_TYPES, signal),
+  ).rejects.toBeInstanceOf(MembershipUnsupported);
+  expect(discoveries).toBe(6);
+  result = {
+    ...result,
+    body: JSON.stringify({ error: "no community is configured for this host" }),
+  };
+  await expect(
+    readMembershipSnapshot(host, MEMBERSHIP_TYPES, signal),
+  ).rejects.not.toBeInstanceOf(MembershipUnsupported);
+  expect(discoveries).toBe(8);
+  for (const change of [
+    { signer_pubkey: relay },
+    { origin: "https://other.test" },
+    { request_id: "cc".repeat(32) },
+  ]) {
+    result = {
+      origin: binding.origin,
+      signer_pubkey: viewer,
+      request_id: requestId,
+      status: 200,
+      body: JSON.stringify(signed(await payload())),
+      ...change,
+    };
+    await expect(
+      readMembershipSnapshot(host, MEMBERSHIP_TYPES, signal),
+    ).rejects.toThrow();
+  }
+});

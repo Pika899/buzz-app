@@ -2252,3 +2252,93 @@ it.each([
   await expect(work).rejects.toBeInstanceOf(ArtifactIncrementalError);
   await expect(work).rejects.toMatchObject({ code });
 });
+
+it("binds native compact reads to each IPC attempt, rejecting swaps, account changes and cancellation", async () => {
+  const { MEMBERSHIP_TYPES, MembershipUnsupported } = await import(
+    "./membership-snapshot"
+  );
+  const { membershipDescriptor, membershipReply } = await import(
+    "./membership-testing"
+  );
+  discovery = { membership_snapshot: membershipDescriptor(relay.secret) };
+  const transport = await connectNativeTransport(community);
+  const original = vi.mocked(invoke).getMockImplementation();
+  const calls: {
+    id: string;
+    types: readonly string[];
+    resolve(value: unknown): void;
+    result: unknown;
+  }[] = [];
+  vi.mocked(invoke).mockImplementation(async (command, args, options) => {
+    if (command === "relay_membership_snapshot") {
+      const request = args as {
+        id: string;
+        types: readonly string[];
+        community: string;
+      };
+      expect(request.community).toBe(community);
+      expect(request.types).toEqual(MEMBERSHIP_TYPES);
+      const requestId = calls.length ? "bb".repeat(32) : "aa".repeat(32);
+      const result = {
+        request_id: requestId,
+        signer_pubkey: viewer.pubkey,
+        origin: community,
+        status: 200,
+        body: JSON.stringify(
+          await membershipReply(
+            relay.secret,
+            viewer.pubkey,
+            requestId,
+            community,
+          ),
+        ),
+      };
+      return new Promise((resolve) =>
+        calls.push({ ...request, resolve, result }),
+      );
+    }
+    if (command === "relay_http_cancel") {
+      const id = (args as { id: string }).id;
+      calls.find((call) => call.id === id)?.resolve({ status: 499, body: "" });
+      return;
+    }
+    return original?.(command, args, options);
+  });
+  const read = (signal = new AbortController().signal) =>
+    transport.readMembershipSnapshot?.(MEMBERSHIP_TYPES, signal, "foreground");
+  const a = read(),
+    b = read();
+  await vi.waitFor(() => expect(calls).toHaveLength(2));
+  expect(calls[0]?.id).not.toBe(calls[1]?.id);
+  calls[1]?.resolve(calls[1].result);
+  await expect(b).resolves.toHaveProperty("channels", []);
+  calls[0]?.resolve(calls[0].result);
+  await expect(a).resolves.toHaveProperty("channels", []);
+  const swapped = expect(read()).rejects.toThrow();
+  await vi.waitFor(() => expect(calls).toHaveLength(3));
+  calls[2]?.resolve({
+    ...(calls[2].result as object),
+    request_id: "ff".repeat(32),
+  });
+  await swapped;
+  const changed = expect(read()).rejects.toThrow();
+  await vi.waitFor(() => expect(calls).toHaveLength(4));
+  calls[3]?.resolve({
+    ...(calls[3].result as object),
+    signer_pubkey: relay.pubkey,
+  });
+  await changed;
+  const controller = new AbortController();
+  const cancelled = expect(read(controller.signal)).rejects.toMatchObject({
+    name: "AbortError",
+  });
+  await vi.waitFor(() => expect(calls).toHaveLength(5));
+  controller.abort();
+  await cancelled;
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith("relay_http_cancel", {
+    id: calls[4]?.id,
+  });
+  discovery = {};
+  await expect(read()).rejects.toBeInstanceOf(MembershipUnsupported);
+  expect(calls).toHaveLength(5);
+});

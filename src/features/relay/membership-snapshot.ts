@@ -1,3 +1,4 @@
+import { readApiFailure, type createApiAdmission } from "./http-admission";
 import { eventDto, type RelayEvent } from "./events";
 import { ReadError } from "./errors";
 import { record } from "./read-state-model";
@@ -272,4 +273,135 @@ export async function membershipText(
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+}
+
+/** The host returns binding and body as one attempt-local result. */
+export type MembershipHostResult = Readonly<{
+  request_id: string;
+  signer_pubkey: string;
+  origin: string;
+  status: number;
+  body: string;
+}>;
+
+/** Each call starts a generation with fresh same-origin discovery. */
+export async function readMembershipSnapshot(
+  host: {
+    origin: string;
+    viewer: string;
+    relay: string;
+    info(signal: AbortSignal): Promise<unknown>;
+    request(
+      types: readonly string[],
+      signal: AbortSignal,
+    ): Promise<MembershipHostResult>;
+  },
+  types: readonly string[],
+  signal: AbortSignal,
+): Promise<MembershipSnapshot> {
+  if (
+    !types.length ||
+    types.length > MEMBERSHIP_TYPES.length ||
+    types.some(
+      (type, index) =>
+        !(MEMBERSHIP_TYPES as readonly string[]).includes(type) ||
+        (index > 0 && (types[index - 1] ?? "") >= type),
+    )
+  )
+    throw invalid();
+  const discover = async () => {
+    const info = await host.info(signal);
+    signal.throwIfAborted();
+    if (!record(info) || info.self !== host.relay) throw invalid();
+    return membershipCapability(info.membership_snapshot, host.relay);
+  };
+  const capability = await discover();
+  if (!capability) throw new MembershipUnsupported();
+  const result = await host.request(types, signal);
+  signal.throwIfAborted();
+  if (result.status === 499)
+    throw new DOMException("Relay read cancelled", "AbortError");
+  if (
+    result.origin !== new URL(host.origin).origin ||
+    result.signer_pubkey !== host.viewer ||
+    !key.test(result.request_id) ||
+    typeof result.body !== "string" ||
+    new TextEncoder().encode(result.body).byteLength >
+      capability.max_response_bytes
+  )
+    throw invalid();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(result.body);
+  } catch {
+    throw invalid();
+  }
+  if (result.status === 404 || Array.isArray(raw)) {
+    await discover();
+    if (
+      membershipDisabled(result.status, raw) ||
+      (result.status === 200 && Array.isArray(raw))
+    )
+      throw new MembershipUnsupported();
+  }
+  if (result.status !== 200)
+    throw new ReadError(
+      "unavailable",
+      `Membership request failed (${result.status})`,
+      result.status,
+    );
+  return parseMembershipSnapshot(
+    raw,
+    {
+      origin: host.origin,
+      viewer: host.viewer,
+      requestId: result.request_id,
+      capability,
+      types,
+    },
+    signal,
+  );
+}
+
+/** Preserve only the protocol's exact disabled response through host admission. */
+export async function admitMembershipSnapshot(
+  lane: ReturnType<typeof createApiAdmission>,
+  request: () => Promise<{
+    response: Response;
+    binding: Omit<MembershipHostResult, "status" | "body">;
+  }>,
+  signal: AbortSignal,
+  priority: "foreground" | "background",
+): Promise<MembershipHostResult> {
+  return lane.run(
+    async () => {
+      const { response, binding } = await request();
+      signal.throwIfAborted();
+      if (response.ok)
+        return {
+          ...binding,
+          status: response.status,
+          body: await membershipText(response, MEMBERSHIP_BYTES),
+        };
+      const failure = await readApiFailure(response, (raw, status) =>
+        membershipDisabled(status, raw)
+          ? "membership_snapshot unsupported"
+          : undefined,
+      );
+      if (failure.quota === "api" && failure.retryAfterMs !== undefined)
+        lane.pause(failure.retryAfterMs);
+      const status =
+        (response.status === 401 || response.status === 403) && !failure.denied
+          ? 502
+          : response.status;
+      // Keep exactly the disabled body; normalized failures cannot select fallback.
+      return {
+        ...binding,
+        status,
+        body: JSON.stringify({ error: failure.error }),
+      };
+    },
+    signal,
+    priority,
+  );
 }

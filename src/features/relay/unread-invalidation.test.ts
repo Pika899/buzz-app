@@ -3,7 +3,14 @@ import type { ChannelQueries, ChannelSummary } from "./contracts";
 import type { ProfileQueries } from "./profile-directory";
 import { createReadState } from "./read-state";
 import { readJournal, type ReadJournal } from "./read-state-storage";
-import { keypair, message, signed } from "./testing";
+import {
+  keypair,
+  message,
+  metadata,
+  roster as rosterEvent,
+  signed,
+} from "./testing";
+import { DiscoveryState } from "./discovery";
 import { createUnread } from "./unread";
 
 const owners: ReturnType<typeof createUnread>[] = [];
@@ -310,3 +317,40 @@ it("counts unread for a joined Guest with unloaded peers, while stale and foreig
     expect(h.unread.snapshot(at(h.targets, 0)).observedCount).toBeNull();
   }
 });
+
+it.each(["deny", "omit", "all"] as const)(
+  "keeps a restored public preview out of unread after %s despite its retained roster",
+  async (loss) => {
+    const relay = keypair();
+    let projected: ChannelSummary | undefined;
+    const h = await setup(1, undefined, (channel, viewer) => {
+      const discovery = new DiscoveryState(viewer, relay.pubkey);
+      const details = metadata(relay, channel.id, channel.name, 10, [
+        ["public"],
+        ["t", "stream"],
+      ]);
+      discovery.accept(details);
+      discovery.accept(rosterEvent(relay, channel.id, [viewer], 10));
+      expect(discovery.get(channel.id)?.viewerMembership?.joined).toBe(true);
+      if (loss === "deny") discovery.deny(channel.id);
+      else if (loss === "omit")
+        discovery.retain(new Set(), discovery.rosterVersions());
+      else discovery.denyAll();
+      expect(discovery.canAccess(channel.id)).toBe(false);
+      discovery.resume(channel.id, details);
+      const preview = discovery.get(channel.id);
+      assert(preview);
+      expect(preview.members).toContain(viewer);
+      projected = preview;
+      expect(discovery.canAccess(channel.id)).toBe(true);
+      expect(discovery.canParticipate(channel.id)).toBe(false);
+      return preview;
+    });
+    expect(h.unread.snapshot(at(h.targets, 0)).observedCount).toBeNull();
+    expect(h.unread.inbox().items).toEqual([]);
+    expect(projected?.viewerMembership).toEqual({
+      pubkey: h.viewer.pubkey,
+      joined: false,
+    });
+  },
+);

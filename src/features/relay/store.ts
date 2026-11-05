@@ -1,6 +1,10 @@
-import { viewerMember } from "./membership";
 import { retryRead } from "./read-retry";
-import { channelRowKind, rowProfileIds, messagePreview } from "./membership";
+import {
+  channelRowKind,
+  rowProfileIds,
+  messagePreview,
+  viewerMember,
+} from "./membership";
 import type { Outbox } from "./outbox";
 import { MessageProjection } from "./message-projection";
 import { createRelayProfiler, type RelayProfiler } from "./profiling";

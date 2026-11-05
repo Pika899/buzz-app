@@ -1,4 +1,8 @@
-import type { ChannelMessage, MembershipChange } from "./contracts";
+import type {
+  ChannelMessage,
+  ChannelSummary,
+  MembershipChange,
+} from "./contracts";
 import type { EventData } from "./events";
 import { objectBody } from "./body";
 
@@ -66,4 +70,17 @@ export function messagePreview(
         ? `Diff: ${row.diff.filePath || "patch"}${row.diff.description ? ` — ${row.diff.description}` : ""}`
         : row.content;
   }
+}
+
+/** Viewer-only membership. Legacy summaries may still carry only a signed roster.
+ * Explicit viewer evidence wins even when a retained peer roster disagrees. */
+export function viewerMember(
+  channel: Pick<ChannelSummary, "viewerMembership" | "members"> | undefined,
+  viewer: string | undefined,
+): boolean {
+  if (!channel || !viewer) return false;
+  const membership = channel.viewerMembership;
+  return membership
+    ? membership.pubkey === viewer && membership.joined
+    : !!channel.members?.includes(viewer);
 }

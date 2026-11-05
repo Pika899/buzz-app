@@ -17,16 +17,26 @@ function at<T>(values: readonly T[], index: number): T {
   return value;
 }
 
-async function setup(count = 3, profiles?: ProfileQueries) {
+async function setup(
+  count = 3,
+  profiles?: ProfileQueries,
+  project: (channel: ChannelSummary, viewer: string) => ChannelSummary = (
+    channel,
+  ) => channel,
+) {
   const viewer = keypair(),
     peer = keypair();
   const roster: readonly ChannelSummary[] = Array.from(
     { length: count },
-    (_, i) => ({
-      id: `c${i}`,
-      name: `Channel ${i}`,
-      members: [viewer.pubkey],
-    }),
+    (_, i) =>
+      project(
+        {
+          id: `c${i}`,
+          name: `Channel ${i}`,
+          members: [viewer.pubkey],
+        },
+        viewer.pubkey,
+      ),
   );
   const channels: ChannelQueries = {
     list: () => ({ status: "ready" as const, channels: roster }),
@@ -276,3 +286,27 @@ it.each([5, 9005])(
     expect(h.listeners[2]).not.toHaveBeenCalled();
   },
 );
+
+it("counts unread for a joined Guest with unloaded peers, while stale and foreign authority cannot admit it", async () => {
+  const h = await setup(1, undefined, (channel, viewer) => {
+    const { members: _peers, ...rest } = channel;
+    return {
+      ...rest,
+      viewerMembership: { pubkey: viewer, joined: true },
+      viewerRole: "guest",
+      readOnly: true,
+    };
+  });
+  expect(h.unread.snapshot(at(h.targets, 0)).observedCount).toBe(1);
+  for (const state of ["denied", "cached", "foreign"] as const) {
+    const h = await setup(1, undefined, (channel, viewer) => ({
+      ...channel,
+      viewerMembership: {
+        pubkey: state === "foreign" ? "another-viewer" : viewer,
+        joined: state !== "denied",
+      },
+      ...(state === "cached" ? { cached: true as const } : {}),
+    }));
+    expect(h.unread.snapshot(at(h.targets, 0)).observedCount).toBeNull();
+  }
+});

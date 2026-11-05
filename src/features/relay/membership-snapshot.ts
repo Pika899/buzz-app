@@ -1,7 +1,7 @@
-import { readApiFailure, type createApiAdmission } from "./http-admission";
-import { eventDto, type RelayEvent } from "./events";
-import { ReadError } from "./errors";
-import { record } from "./read-state-model";
+import { readApiFailure, type createApiAdmission } from "./http-admission.ts";
+import { eventDto, type RelayEvent } from "./events.ts";
+import { ReadError } from "./errors.ts";
+import { record } from "./read-state-model.ts";
 
 export const MEMBERSHIP_TYPES = [
   "dm",

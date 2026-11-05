@@ -857,7 +857,7 @@ function InboxList({
         !current.archived &&
         current.channelType === channel.channelType &&
         viewerMember(current, scope.viewer) &&
-        [...current.members].sort().join(":") === membership &&
+        current.members?.slice().sort().join(":") === membership &&
         session.unread.generation() === generation &&
         session.unread
           .inbox()

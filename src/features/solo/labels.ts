@@ -1,4 +1,4 @@
-import { viewerMember } from "../relay/membership";
+import { viewerMember } from "../relay/membership.ts";
 import type { ChannelSummary } from "../relay/contracts.ts";
 
 /** Presentation provenance in the relay's existing NIP-CL labels, never access. */

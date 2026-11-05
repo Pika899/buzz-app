@@ -2253,22 +2253,23 @@ it.each([
   await expect(work).rejects.toMatchObject({ code });
 });
 
-it("binds native compact reads to each IPC attempt, rejecting swaps, account changes and cancellation", async () => {
-  const { MEMBERSHIP_TYPES, MembershipUnsupported } = await import(
-    "./membership-snapshot"
-  );
+async function compactNativeFixture() {
+  const { MEMBERSHIP_TYPES } = await import("./membership-snapshot");
   const { membershipDescriptor, membershipReply } = await import(
     "./membership-testing"
   );
   discovery = { membership_snapshot: membershipDescriptor(relay.secret) };
   const transport = await connectNativeTransport(community);
   const original = vi.mocked(invoke).getMockImplementation();
-  const calls: {
+  type Call = {
     id: string;
-    types: readonly string[];
+    requestId: string;
     resolve(value: unknown): void;
-    result: unknown;
-  }[] = [];
+    reply(change?: object): Promise<void>;
+  };
+  const calls: Call[] = [];
+  const queue: Call[] = [];
+  const waiting: ((call: Call) => void)[] = [];
   vi.mocked(invoke).mockImplementation(async (command, args, options) => {
     if (command === "relay_membership_snapshot") {
       const request = args as {
@@ -2278,67 +2279,112 @@ it("binds native compact reads to each IPC attempt, rejecting swaps, account cha
       };
       expect(request.community).toBe(community);
       expect(request.types).toEqual(MEMBERSHIP_TYPES);
-      const requestId = calls.length ? "bb".repeat(32) : "aa".repeat(32);
-      const result = {
-        request_id: requestId,
-        signer_pubkey: viewer.pubkey,
-        origin: community,
-        status: 200,
-        body: JSON.stringify(
-          await membershipReply(
-            relay.secret,
-            viewer.pubkey,
-            requestId,
-            community,
-          ),
-        ),
-      };
-      return new Promise((resolve) =>
-        calls.push({ ...request, resolve, result }),
-      );
+      const requestId = (calls.length + 1).toString(16).padStart(64, "0");
+      return new Promise((resolve) => {
+        const call: Call = {
+          id: request.id,
+          requestId,
+          resolve,
+          async reply(change = {}) {
+            resolve({
+              request_id: requestId,
+              signer_pubkey: viewer.pubkey,
+              origin: community,
+              status: 200,
+              body: JSON.stringify(
+                await membershipReply(
+                  relay.secret,
+                  viewer.pubkey,
+                  requestId,
+                  community,
+                ),
+              ),
+              ...change,
+            });
+          },
+        };
+        calls.push(call);
+        const receive = waiting.shift();
+        if (receive) receive(call);
+        else queue.push(call);
+      });
     }
     if (command === "relay_http_cancel") {
-      const id = (args as { id: string }).id;
-      calls.find((call) => call.id === id)?.resolve({ status: 499, body: "" });
+      calls
+        .find((call) => call.id === (args as { id: string }).id)
+        ?.resolve({ status: 499, body: "" });
       return;
     }
     return original?.(command, args, options);
   });
-  const read = (signal = new AbortController().signal) =>
-    transport.readMembershipSnapshot?.(MEMBERSHIP_TYPES, signal, "foreground");
-  const a = read(),
-    b = read();
-  await vi.waitFor(() => expect(calls).toHaveLength(2));
-  expect(calls[0]?.id).not.toBe(calls[1]?.id);
-  calls[1]?.resolve(calls[1].result);
-  await expect(b).resolves.toHaveProperty("channels", []);
-  calls[0]?.resolve(calls[0].result);
-  await expect(a).resolves.toHaveProperty("channels", []);
-  const swapped = expect(read()).rejects.toThrow();
-  await vi.waitFor(() => expect(calls).toHaveLength(3));
-  calls[2]?.resolve({
-    ...(calls[2].result as object),
-    request_id: "ff".repeat(32),
-  });
-  await swapped;
-  const changed = expect(read()).rejects.toThrow();
-  await vi.waitFor(() => expect(calls).toHaveLength(4));
-  calls[3]?.resolve({
-    ...(calls[3].result as object),
-    signer_pubkey: relay.pubkey,
-  });
-  await changed;
-  const controller = new AbortController();
-  const cancelled = expect(read(controller.signal)).rejects.toMatchObject({
-    name: "AbortError",
-  });
-  await vi.waitFor(() => expect(calls).toHaveLength(5));
-  controller.abort();
-  await cancelled;
-  expect(vi.mocked(invoke)).toHaveBeenCalledWith("relay_http_cancel", {
-    id: calls[4]?.id,
-  });
-  discovery = {};
-  await expect(read()).rejects.toBeInstanceOf(MembershipUnsupported);
-  expect(calls).toHaveLength(5);
+  return {
+    read: (signal = new AbortController().signal) =>
+      transport.readMembershipSnapshot?.(
+        MEMBERSHIP_TYPES,
+        signal,
+        "foreground",
+      ),
+    next: () =>
+      new Promise<Call>((resolve) => {
+        const call = queue.shift();
+        if (call) resolve(call);
+        else waiting.push(resolve);
+      }),
+    finish: () => {
+      for (const call of calls) call.resolve({ status: 499, body: "" });
+    },
+  };
+}
+
+it("binds concurrent native compact reads to their own IPC attempts", async () => {
+  const fixture = await compactNativeFixture();
+  try {
+    const a = fixture.read(),
+      b = fixture.read();
+    const first = await fixture.next(),
+      second = await fixture.next();
+    expect(first.id).not.toBe(second.id);
+    expect(first.requestId).not.toBe(second.requestId);
+    await second.reply();
+    await expect(b).resolves.toHaveProperty("channels", []);
+    await first.reply();
+    await expect(a).resolves.toHaveProperty("channels", []);
+  } finally {
+    fixture.finish();
+  }
+});
+
+it("rejects swapped auth and account changes on native compact reads", async () => {
+  const fixture = await compactNativeFixture();
+  try {
+    const swapped = expect(fixture.read()).rejects.toThrow();
+    await (await fixture.next()).reply({ request_id: "ff".repeat(32) });
+    await swapped;
+    const changed = expect(fixture.read()).rejects.toThrow();
+    await (await fixture.next()).reply({ signer_pubkey: relay.pubkey });
+    await changed;
+  } finally {
+    fixture.finish();
+  }
+});
+
+it("cancels native compact reads and discovers disabled capability afresh", async () => {
+  const { MembershipUnsupported } = await import("./membership-snapshot");
+  const fixture = await compactNativeFixture();
+  try {
+    const controller = new AbortController();
+    const cancelled = expect(
+      fixture.read(controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    const call = await fixture.next();
+    controller.abort();
+    await cancelled;
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("relay_http_cancel", {
+      id: call.id,
+    });
+    discovery = {};
+    await expect(fixture.read()).rejects.toBeInstanceOf(MembershipUnsupported);
+  } finally {
+    fixture.finish();
+  }
 });

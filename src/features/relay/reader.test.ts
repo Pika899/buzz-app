@@ -509,11 +509,15 @@ it("schedules compact snapshots in the existing lanes with independent cancellat
   expect(scripted.pending).toHaveLength(1);
   controller.abort();
   await firstError;
-  expect(calls[0]?.signal.aborted).toBe(false);
+  expect(calls[0]?.signal.aborted).toBe(true);
+  // The second request was made during the first attempt, so cancellation of
+  // that older attempt must leave a new generation queued and runnable.
+  expect(calls).toHaveLength(2);
   calls[0]?.reject(new MembershipUnsupported());
-  await secondError;
-  await vi.waitFor(() => expect(calls).toHaveLength(2));
   calls[1]?.reject(new MembershipUnsupported());
+  await secondError;
+  await vi.waitFor(() => expect(calls).toHaveLength(3));
+  calls[2]?.reject(new MembershipUnsupported());
   scripted.next().respond([]);
   await Promise.all([freshError, foreground]);
 });

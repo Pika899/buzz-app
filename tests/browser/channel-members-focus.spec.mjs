@@ -919,9 +919,7 @@ test("member identity filter sits inside search and preserves modal focus", asyn
     }
     await agents.click();
     await expect(filter).toBeFocused();
-    await expect(filter).toHaveAccessibleName(
-      "Filter members: Agents",
-    );
+    await expect(filter).toHaveAccessibleName("Filter members: Agents");
     await expect(
       dialog.getByRole("region", { name: "People", exact: true }),
     ).toHaveCount(0);

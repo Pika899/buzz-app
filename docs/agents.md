@@ -560,6 +560,9 @@ grid follows the answer: it returns to the kept card, or goes to the card
 chosen or closed. Closing the panel while focus is inside it, with or without a
 prompt, moves focus to the closed agent's card. Import opens as a dialog over the page, so the open agent and
 its draft stay. Deleting an agent closes only its own panel, without asking.
+A team's editor on Your teams asks the same way before Escape, its Close or
+another tab drops an unsaved name, instructions or members; one untouched, or
+whose Save or Delete succeeded, closes at once, and Back leaves a busy one open.
 
 A reviewed provider choice remains a host-owned draft until the form's Save
 action succeeds or the owner confirms discarding it. While it is pending, the

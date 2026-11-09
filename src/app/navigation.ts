@@ -294,8 +294,32 @@ export function useAppNavigation(
     owner: typeof owner;
     presentation: ReturnType<AppServices["navigationHost"]["request"]>;
   }>(undefined);
-  useEffect(() => () => workspace.current?.presentation.dispose(), []);
+  // Settings' own visit, kept while a join dialog presents over it.
+  const settingsView = useRef<{
+    attempt: OpenAttempt;
+    presentation: ReturnType<AppServices["navigationHost"]["request"]>;
+  }>(undefined);
+  useEffect(
+    () => () => {
+      workspace.current?.presentation.dispose();
+      settingsView.current?.presentation.dispose();
+    },
+    [],
+  );
   useLayoutEffect(() => {
+    // A join dialog over Settings: Settings keeps its own visit beneath, as a
+    // page does, so what it presents is not reopened by the dialog's visit.
+    const beneath =
+      join && settings && !owner.waiting && !owner.failure
+        ? settingsBeneath(settingsView.current, owner.attempt)
+        : undefined;
+    if (beneath) {
+      services.navigationHost.complete(owner.attempt, { status: "opened" });
+      setPresentation({ owner, request: beneath });
+      return;
+    }
+    settingsView.current?.presentation.dispose();
+    settingsView.current = undefined;
     if (owner.waiting || owner.failure) return;
     const previous = workspace.current;
     if (!settings && previous?.presentation.resume(owner.attempt)) {
@@ -353,10 +377,13 @@ export function useAppNavigation(
           };
         },
       },
-      !settings && !!owner.page,
+      settings || !!owner.page,
     );
     setPresentation({ owner, request: next.request });
-    if (settings) return next.dispose;
+    if (settings) {
+      settingsView.current = { attempt: owner.attempt, presentation: next };
+      return;
+    }
     workspace.current = { owner, presentation: next };
   }, [services, owner, settings, join]);
   const retained = workspace.current;
@@ -380,9 +407,11 @@ export function useAppNavigation(
   const request =
     presentation?.owner === owner
       ? presentation.request
-      : !settings && sameWorkspaceVisit
-        ? retainedRequest
-        : undefined;
+      : join && settings && !waiting && !failure
+        ? settingsBeneath(settingsView.current, state.attempt)
+        : !settings && sameWorkspaceVisit
+          ? retainedRequest
+          : undefined;
   const workspacePage = covered
     ? retainedRequest && retained?.owner.page
     : page;
@@ -669,6 +698,22 @@ function legacyPageTarget(
       ...scope,
     };
   }
+}
+
+/** Settings' request kept beneath this join dialog's visit, if it was opened
+ * over that Settings visit. */
+function settingsBeneath(
+  shown:
+    | { attempt: OpenAttempt; presentation: { request: PageNavigation } }
+    | undefined,
+  join: OpenAttempt,
+) {
+  return shown &&
+    !shown.presentation.request.signal.aborted &&
+    shown.attempt.entry.id !== join.entry.id &&
+    sameVisitBeneath(shown.attempt, join)
+    ? shown.presentation.request
+    : undefined;
 }
 
 /** Whether a retained page is the visit this join dialog was opened over: a

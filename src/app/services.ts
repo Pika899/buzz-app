@@ -47,7 +47,11 @@ import type {
   JoinForm,
   JoinVisitState,
 } from "../features/communities/invite-intent";
-import { withoutJoin, type OpenTarget } from "../features/navigation/targets";
+import {
+  joinBeneath,
+  withoutJoin,
+  type OpenTarget,
+} from "../features/navigation/targets";
 import {
   connectNativeTransport,
   verifyNativeStored,
@@ -196,7 +200,7 @@ export function createServices() {
     const visit = crypto.randomUUID();
     inviteIntent.set(visit, state);
     const target: OpenTarget = {
-      ...withoutJoin(navigation.snapshot().entry.target),
+      ...joinBeneath(navigation.snapshot().entry.target),
       join: {
         viewer,
         visit,

@@ -9,6 +9,7 @@ import {
 import type { AppServices } from "./services";
 import { communityDestination } from "../features/communities/destination";
 import {
+  joinBeneath,
   targetKey,
   withoutJoin,
   type OpenTarget,
@@ -723,7 +724,7 @@ function sameVisitBeneath(
   join: { entry: { target: OpenTarget } },
 ) {
   return (
-    targetKey(withoutJoin(retained.entry.target)) ===
-    targetKey(withoutJoin(join.entry.target))
+    targetKey(joinBeneath(retained.entry.target)) ===
+    targetKey(joinBeneath(join.entry.target))
   );
 }

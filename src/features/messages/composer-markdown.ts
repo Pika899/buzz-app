@@ -55,7 +55,7 @@ export function composerMarkdown(draft: MentionDraft): string {
       : node.isLeaf
         ? node
         : node.copy(Fragment.fromArray(node.content.content.map(project)));
-  const doc = project(readComposerDocument(draft, []));
+  const doc = qualifyNamesakes(project(readComposerDocument(draft, [])));
   return [
     ...(draft.chatCards ?? []),
     blocksMarkdown(doc),
@@ -63,6 +63,60 @@ export function composerMarkdown(draft: MentionDraft): string {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/** The timeline binds a bare `@Name` only when one tagged key carries the name.
+ * Chips of different keys sharing an exact name are therefore sent as
+ * `@Name (<hex>)`, the form that names one key. Code blocks stay as typed. */
+function qualifyNamesakes(doc: EditorNode): EditorNode {
+  const person = (
+    node?: EditorNode,
+  ): { pubkey: string; name: string } | undefined =>
+    node?.attrs.recipient ??
+    composerSchema.marks.recipient.isInSet(node?.marks ?? [])?.attrs;
+  const keys = new Map<string, Set<string>>();
+  doc.descendants((node) => {
+    const found = person(node);
+    if (found)
+      keys.set(
+        found.name,
+        (keys.get(found.name) ?? new Set()).add(found.pubkey),
+      );
+  });
+  if (![...keys.values()].some((set) => set.size > 1)) return doc;
+  const visit = (node: EditorNode): EditorNode => {
+    if (node.type.spec.code) return node;
+    const children: EditorNode[] = [];
+    node.forEach((child, _offset, index) => {
+      if (!node.isTextblock) {
+        children.push(visit(child));
+        return;
+      }
+      const found = person(child);
+      if (!found || (keys.get(found.name)?.size ?? 0) < 2) {
+        children.push(child);
+        return;
+      }
+      const qualifier = ` (${found.pubkey.toLowerCase()})`;
+      if (!child.isText) {
+        children.push(
+          child.type.create(
+            { ...child.attrs, source: child.attrs.source + qualifier },
+            null,
+            child.marks,
+          ),
+        );
+        return;
+      }
+      children.push(child);
+      // A marked run of text takes the qualifier once, after its last node.
+      const next = node.maybeChild(index + 1);
+      if (!next?.isText || person(next)?.pubkey !== found.pubkey)
+        children.push(composerSchema.text(qualifier, child.marks));
+    });
+    return node.copy(Fragment.from(children));
+  };
+  return visit(doc);
 }
 
 function blocksMarkdown(doc: EditorNode): string {

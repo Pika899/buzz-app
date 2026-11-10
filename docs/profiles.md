@@ -94,11 +94,14 @@ performs DNS verification. Ordinary human profiles have no agent fields.
   This is not a Markdown parser or a notification change.
 - Replacement edits remain readable but their mentions are not clickable: old
   Buzz can change body identity bindings without changing original recipients.
-  Full-key-qualified namesake occurrences also remain literal. After Markdown
-  image or file attachment removal, signed names in the remaining prose can bind
-  beside the removed attachment, but a name crossing an interior removal seam
-  stays plain text: stripping must not manufacture a name absent from the signed
-  prose. If Markdown link repair changes a body with attachment seams, mentions
+  The composer sends chips of different keys that share an exact name as
+  `@Name (<64-hex key>)`; that span binds to the signed key it names when the
+  key carries `Name`, shown as `Name (d14dfe03…c56a)` unless the name
+  directory already disambiguates it, and any other qualified span stays
+  literal. After Markdown image or file attachment removal, signed names in the
+  remaining prose can bind beside the removed attachment, but a name crossing an
+  interior removal seam stays plain text: stripping must not manufacture a name
+  absent from the signed prose. If Markdown link repair changes a body with attachment seams, mentions
   remain unbound because the seam offsets no longer identify the repaired text.
   Image attachments and signed notification recipients are unchanged. Full
   edit-snapshot rendering compatibility is deliberately deferred.

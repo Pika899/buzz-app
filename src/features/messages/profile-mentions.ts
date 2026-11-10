@@ -76,12 +76,20 @@ export function profileMentionParts(
       continue;
     }
     const [name, keys] = candidate;
-    const end = i + 1 + name.length;
-    // Legacy namesake qualifiers carry a different exact identity. Do not let a
-    // known shorter name claim their prefix; qualified rendering is deferred.
-    const qualifier = /^ \([a-f0-9]{64}\)/i.exec(text.slice(end))?.[0];
+    let end = i + 1 + name.length;
+    // A namesake qualifier names its exact identity. Bind the whole span only to
+    // a signed key that carries this name; otherwise skip it so a known shorter
+    // name cannot claim the prefix.
+    const qualifier = /^ \(([a-f0-9]{64})\)/i.exec(text.slice(end));
     if (qualifier) {
-      i = end + qualifier.length;
+      const target = profileTarget(qualifier[1] ?? "");
+      end += qualifier[0].length;
+      if (target && keys.has(target) && !spansSeam(i, end)) {
+        if (i > plain) parts.push({ text: text.slice(plain, i) });
+        parts.push({ text: text.slice(i, end), target });
+        plain = end;
+      }
+      i = end;
       continue;
     }
     if (keys.size === 1) {

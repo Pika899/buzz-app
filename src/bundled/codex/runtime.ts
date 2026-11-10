@@ -293,6 +293,8 @@ export class CodexRuntime {
     }
   >();
   private disposed = false;
+  /** The shared server started before Codex's sign-in changed. */
+  private stale = false;
   private opening = new Map<
     string,
     {
@@ -998,6 +1000,20 @@ export class CodexRuntime {
     this.stopping.clear();
     this.close();
   }
+  /** Codex's sign-in changed, and the shared server holds the old one: it
+   * stops once no turn is running, and the next turn starts a new one. */
+  restart() {
+    this.stale = true;
+    this.renew();
+  }
+  private renew() {
+    if (!this.stale) return;
+    for (const entry of this.entries.values())
+      if (entry.lanes.size || entry.onces.size) return;
+    this.stale = false;
+    void this.server?.rpc.close();
+    this.server = undefined;
+  }
   /** Starts the shared server ahead of the first mention. */
   warm() {
     this.open();
@@ -1450,8 +1466,10 @@ export class CodexRuntime {
           await loaded.bridge?.close();
         }
         delete lane.voice;
-        if (!lane.active && !lane.queued && entry.lanes.get(key) === lane)
+        if (!lane.active && !lane.queued && entry.lanes.get(key) === lane) {
           entry.lanes.delete(key);
+          this.renew();
+        }
       })();
       lane.tail = closing;
       return closing;
@@ -2005,6 +2023,7 @@ export class CodexRuntime {
           .catch(() => undefined);
       }
       entry.onces.delete(once);
+      this.renew();
       release();
     }
   }
@@ -2148,6 +2167,7 @@ export class CodexRuntime {
       .finally(() => {
         if (current.tail === job && !current.active && !current.voice) {
           entry.lanes.delete(key);
+          this.renew();
           for (const listener of this.listeners) listener();
         }
       });

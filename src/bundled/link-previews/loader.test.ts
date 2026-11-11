@@ -197,6 +197,38 @@ describe("createLoader", () => {
     expect(requestBytes).toHaveBeenCalledTimes(2);
   });
 
+  it("reads other previews while images decode", async () => {
+    const create = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation(() => "blob:test/a");
+    vi.stubGlobal(
+      "Image",
+      class {
+        src = "";
+        decode = () => new Promise(() => {});
+      },
+    );
+    try {
+      const readPage = vi.fn(async () => ({ status: 200, preview: {} }));
+      const loader = createLoader({
+        readPage,
+        requestBytes: vi.fn(async () => ({
+          status: 200,
+          headers: { "content-type": "image/png" },
+          body: new Uint8Array([1]),
+        })),
+      });
+      for (let i = 0; i < 4; i++)
+        void loader.image(`https://img.example.com/${i}.png`).picture;
+      await new Promise((resolve) => setTimeout(resolve));
+      await loader.page("https://example.com/");
+      expect(readPage).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+      create.mockRestore();
+    }
+  });
+
   it("is unavailable without a page reader", async () => {
     const loader = createLoader(undefined);
     expect(loader.available).toBe(false);

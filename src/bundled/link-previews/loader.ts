@@ -145,8 +145,10 @@ export function createLoader(host: Reader | undefined) {
     if (!held.kept && held.users === 0) revoke(held);
   };
 
-  const loadImage = (url: string) =>
-    follow(url, async (target) => {
+  /** Fetches within a slot, then decodes outside it, so a slow decode never
+   * holds up another preview's request. */
+  const loadImage = async (url: string): Promise<Picture | null> => {
+    const blob = await follow(url, async (target) => {
       if (!requestBytes) return null;
       const reply = await requestBytes({
         url: target.href,
@@ -173,20 +175,21 @@ export function createLoader(host: Reader | undefined) {
         stopped
       )
         return null;
-      const src = URL.createObjectURL(
-        new Blob([reply.body as BlobPart], { type }),
-      );
-      const image = new Image();
-      image.src = src;
-      try {
-        await image.decode();
-      } catch {
-        URL.revokeObjectURL(src);
-        return null;
-      }
-      const { naturalWidth: width, naturalHeight: height } = image;
-      return { value: { src, width, height } };
+      return { value: new Blob([reply.body as BlobPart], { type }) };
     }).catch(() => null);
+    if (!blob || stopped) return null;
+    const src = URL.createObjectURL(blob);
+    const image = new Image();
+    image.src = src;
+    try {
+      await image.decode();
+    } catch {
+      URL.revokeObjectURL(src);
+      return null;
+    }
+    const { naturalWidth: width, naturalHeight: height } = image;
+    return { src, width, height };
+  };
 
   return {
     available: !!readPage,

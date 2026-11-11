@@ -70,7 +70,7 @@ export function composerMarkdown(draft: MentionDraft): string {
 }
 
 /** The timeline binds a bare `@Name` only when one tagged key carries the name.
- * Chips of different keys sharing an exact name are therefore sent as
+ * Chips of different keys sharing a name, ignoring case, are therefore sent as
  * `@Name (<hex>)`, the form that names one key. A chip the timeline cannot bind,
  * inside code, a link, an image, a definition or HTML, stays as typed. */
 function qualifyNamesakes(doc: EditorNode): EditorNode {
@@ -82,10 +82,12 @@ function qualifyNamesakes(doc: EditorNode): EditorNode {
   const keys = new Map<string, Set<string>>();
   doc.descendants((node) => {
     const found = person(node);
+    // Mobile readers match names case-insensitively, so case-only namesakes
+    // collide too; each occurrence keeps its own spelling.
     if (found)
       keys.set(
-        found.name,
-        (keys.get(found.name) ?? new Set()).add(found.pubkey),
+        found.name.toLowerCase(),
+        (keys.get(found.name.toLowerCase()) ?? new Set()).add(found.pubkey),
       );
   });
   if (![...keys.values()].some((set) => set.size > 1)) return doc;
@@ -115,7 +117,7 @@ function qualifyNamesakes(doc: EditorNode): EditorNode {
       const found = person(child);
       if (
         !found ||
-        (keys.get(found.name)?.size ?? 0) < 2 ||
+        (keys.get(found.name.toLowerCase())?.size ?? 0) < 2 ||
         code.isInSet(child.marks) ||
         link.isInSet(child.marks) ||
         authored?.().some((range) => from < range.end && start > range.start)

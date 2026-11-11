@@ -200,6 +200,17 @@ it("sends chips of different keys sharing a name as `@Name (<hex>)`, others bare
       ),
     ),
   ).toBe(`@Honey (${"a".repeat(64)}) \`@Honey\``);
+  // Names differing only in case collide; each keeps its own spelling.
+  expect(
+    composerMarkdown(
+      typedDraft(
+        mentionDraft({
+          text: "@Honey @honey",
+          recipients: [first, { ...second, name: "honey" }],
+        }),
+      ),
+    ),
+  ).toBe(`@Honey (${"a".repeat(64)}) @honey (${"b".repeat(64)})`);
   // One key under a name, even twice, stays bare.
   expect(
     composerMarkdown(

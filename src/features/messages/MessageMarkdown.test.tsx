@@ -761,7 +761,7 @@ describe("Markdown profile mentions", () => {
     expect(html).toContain("@Mic Smith and <button");
   });
 
-  it("renders full-key-qualified namesakes as two short-keyed controls", () => {
+  it("renders full-key-qualified namesakes as two named controls", () => {
     const html = render(`@Mic (${mic}) @Mic (${other})`, {
       patch: { mentions: [mic, other] },
       participantProfiles: new Map([
@@ -772,9 +772,8 @@ describe("Markdown profile mentions", () => {
     expect(html.match(/<button/g)).toHaveLength(2);
     expect(html).toContain(`data-profile-target="${profileTarget(mic)}"`);
     expect(html).toContain(`data-profile-target="${profileTarget(other)}"`);
-    expect(html).toContain("Mic (bbbbbbbb…bbbb)");
-    expect(html).toContain("Mic (cccccccc…cccc)");
-    expect(html).not.toContain(mic);
+    expect(html.match(/data-mention-name="Mic"/g)).toHaveLength(2);
+    expect(html).not.toContain(`(${mic})`);
   });
 
   it("updates a mounted mention label without changing signed binding or profile target", () => {

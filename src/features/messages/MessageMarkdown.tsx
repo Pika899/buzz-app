@@ -709,11 +709,8 @@ function PreparedMessageMarkdown({
     const clickable =
       interactive && typeof target === "string" && !!canOpenLink?.(target);
     if (typeof text === "string" && typeof target === "string") {
-      // A namesake-qualified span reads `Name (d14dfe03…c56a)` unless the name
-      // directory already disambiguates it.
-      const shown = text
-        .slice(1)
-        .replace(/ \(([a-f0-9]{8})[a-f0-9]{52}([a-f0-9]{4})\)$/i, " ($1…$2)");
+      // A namesake-qualified span shows its name; its target is the key.
+      const shown = text.slice(1).replace(/ \([a-f0-9]{64}\)$/i, "");
       const label = key ? resolveName(key, shown) : shown;
       const Mention = clickable ? "button" : "span";
       // Selection copy reads the identity and the whole label (selection-copy.ts).

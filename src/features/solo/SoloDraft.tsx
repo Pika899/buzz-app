@@ -7,6 +7,10 @@ import { startingChatTitle } from "./chat-title";
 import { ChatNotStarted } from "../relay/channel-writes";
 import { DraftSettings } from "./DraftSettings";
 import { SoloDraftView } from "./SoloPresentation";
+import { ConversationListToggle } from "../conversation/ConversationListToggle";
+import { useAgentChoices } from "../agents/use-choices";
+import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
+import { avatarMedia } from "../../shared/avatar-source";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { GearIcon } from "../../shared/design-system/icons";
@@ -16,7 +20,13 @@ import {
   parseChatSetup,
   type ChatSetup,
 } from "./workspace";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { RelaySession } from "../relay/session";
 import {
   readView,
@@ -175,11 +185,13 @@ export function SoloDraft({
   source,
   visit,
   embedded = false,
+  navigation,
   draftPrefix,
   onDraftChange,
 }: {
   /** Only the composer, inside a host's own page (New message's To). */
   embedded?: boolean;
+  navigation?: ReactNode;
   /** An embedded New message host can retain its draft when switching to Solo. */
   draftPrefix?: string;
   onDraftChange?: ((draft: MentionDraft) => void) | undefined;
@@ -230,6 +242,19 @@ export function SoloDraft({
   // New chats tag their agent in the draft: the one the route names, else the
   // default.
   const defaultAgent = useDefaultAgent(session, scope, agent);
+  const [draftAgent, setDraftAgent] = useState<
+    MentionRecipient | null | undefined
+  >(
+    () =>
+      mentionDraft(readView(scope, `${draftKey}:new-draft`, "")).recipients[0],
+  );
+  const primaryAgent = draftAgent === undefined ? defaultAgent : draftAgent;
+  const choices = useAgentChoices(session, false);
+  const primaryIdentity = choices.identities.find(
+    (choice) => choice.pubkey === primaryAgent?.pubkey,
+  );
+  const primaryName =
+    primaryIdentity?.managedName ?? primaryIdentity?.name ?? primaryAgent?.name;
   const [selectedProject, setSelectedProject] = useState(() => {
     const saved = readView<unknown>(
       scope,
@@ -706,6 +731,7 @@ export function SoloDraft({
         label="Message your agents"
         inviteAgents
         defaultMention={defaultAgent}
+        onPrimaryRecipientChange={setDraftAgent}
         requireMention
         trailingTool={
           session.soloPreferences ? (
@@ -763,6 +789,27 @@ export function SoloDraft({
   if (embedded) return composer;
   return (
     <SoloDraftView
+      navigation={navigation ?? <ConversationListToggle />}
+      identity={
+        primaryAgent && primaryName
+          ? {
+              name: primaryName,
+              artwork: (
+                <AvatarStack
+                  size="large"
+                  items={[
+                    {
+                      id: primaryAgent.pubkey,
+                      name: primaryName,
+                      src: avatarMedia(primaryIdentity?.avatar, session.media),
+                      shape: "squircle",
+                    },
+                  ]}
+                />
+              ),
+            }
+          : undefined
+      }
       actions={
         <IconButton
           ref={settingsTrigger}

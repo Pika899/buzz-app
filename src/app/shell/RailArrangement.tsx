@@ -91,7 +91,9 @@ const collisions: CollisionDetection = (args) =>
   pointerWithin({
     ...args,
     droppableContainers: args.droppableContainers.filter((item) =>
-      args.active.data.current?.section ? item.id !== "rail:new-section" : true,
+      args.active.data.current?.section
+        ? item.id !== "rail:new-section"
+        : item.id !== "rail:top",
     ),
   });
 
@@ -216,7 +218,13 @@ export function RailArrangement({
                 over.id !== data.source &&
                 over.id !== "rail:new-section");
           if (!over) return;
-          if (data?.section) value.reorder(data.section, String(over.id));
+          if (data?.section)
+            value.reorder(
+              data.section,
+              over.id === "rail:top"
+                ? (groups[0]?.id ?? data.section)
+                : String(over.id),
+            );
           else if (data?.entry) {
             if (over.id === "rail:new-section") setCreating(data.entry);
             else if (over.id !== data.source)
@@ -265,6 +273,7 @@ export function RailArrangement({
                     event.preventDefault();
                 }}
               >
+                <FirstSectionTarget />
                 {groups.map((group) => (
                   <motion.div
                     key={group.id}
@@ -352,6 +361,7 @@ export function RailGroup({
   footer,
   rowsLabel,
   unlimited = false,
+  avatarGrid = id === "pins",
   trailingEntryId,
   sortEntries,
   pageContent,
@@ -363,6 +373,7 @@ export function RailGroup({
   footer?: ReactNode;
   rowsLabel?: string;
   unlimited?: boolean;
+  avatarGrid?: boolean;
   trailingEntryId?: string;
   sortEntries?: (a: RailEntry, b: RailEntry) => number;
   pageContent?: ReactNode;
@@ -401,18 +412,23 @@ export function RailGroup({
       child.props.entry &&
       child.props.section === id
     ) {
-      if (!arrangement?.assignedEntryIds.has(child.props.entry.id))
+      if (
+        id === "agents" ||
+        !arrangement?.assignedEntryIds.has(child.props.entry.id)
+      )
         rows.push(child);
     } else notes.push(child);
   }
   const placed =
     arrangement?.placements.filter((item) => item.section === id) ?? [];
-  for (const { entry } of placed)
+  for (const { entry } of placed) {
+    if (rows.some((row) => row.props.entry.id === entry.id)) continue;
     rows.push(
       <RailDestinationRow key={entry.id} entry={entry} section={id}>
         {arrangement?.renderEntry(entry, id)}
       </RailDestinationRow>,
     );
+  }
   if (sortEntries)
     rows.sort((a, b) => sortEntries(a.props.entry, b.props.entry));
   if (trailingEntryId)
@@ -515,7 +531,11 @@ export function RailGroup({
       </span>
       <NavigationSection
         label={
-          <Button {...drag.listeners} variant="plain" size="text">
+          <Button
+            variant="plain"
+            size="text"
+            onClick={() => arrangement?.openSection(id)}
+          >
             {title}
           </Button>
         }
@@ -527,8 +547,11 @@ export function RailGroup({
               <li key={row.key}>{row}</li>
             ))}
           </ul>
-        ) : id === "pins" ? (
-          <div className={styles.pinsGrid} data-pins-grid="">
+        ) : avatarGrid ? (
+          <div
+            className={styles.avatarGrid}
+            data-pins-grid={id === "pins" ? "" : undefined}
+          >
             {shown}
           </div>
         ) : (
@@ -577,7 +600,7 @@ export function RailGroup({
   );
 }
 
-/** Assigned rows render once in their chosen section, even if also in a live feed. */
+/** Agents retain their inventory entry; other rows move to their chosen section. */
 export function RailSourceRow({
   entry,
   section,
@@ -588,7 +611,8 @@ export function RailSourceRow({
   children: ReactNode;
 }) {
   const arrangement = useContext(ArrangementContext);
-  if (arrangement?.assignedEntryIds.has(entry.id)) return null;
+  if (section !== "agents" && arrangement?.assignedEntryIds.has(entry.id))
+    return null;
   return (
     <RailDestinationRow entry={entry} section={section}>
       {children}
@@ -669,6 +693,22 @@ export function RailDestinationRow({
     </ContextMenuRoot>
   );
 }
+function FirstSectionTarget() {
+  const { active } = useDndContext();
+  const { setNodeRef, isOver } = useDroppable({
+    id: "rail:top",
+    disabled: !active?.data.current?.section,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={styles.firstSectionTarget}
+      data-drop-target={isOver || undefined}
+      aria-hidden="true"
+    />
+  );
+}
+
 function NewSectionTarget() {
   const { active } = useDndContext();
   const shown = !!active && !active.data.current?.section;

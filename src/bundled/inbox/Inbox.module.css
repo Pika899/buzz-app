@@ -134,7 +134,7 @@
 
 .collectionPanes {
   display: grid;
-  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  grid-template-columns: auto 0 minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -155,6 +155,11 @@
 }
 .sheetFeed {
   --collection-content-inset: var(--space-4);
+  max-width: max(220px, calc(100cqw - 320px));
+}
+.collectionPanes[data-list-open="false"] > .sheetFeed + hr,
+.sheetHost[data-narrow] .sheetFeed + hr {
+  display: none;
 }
 
 .collectionCreate {
@@ -180,7 +185,6 @@
 /* The list keeps a fixed width while the reader lays out once at its new size. */
 :where(.collectionPanes[data-list-controlled]) .sheetFeed {
   display: flex;
-  width: min(22rem, 100%);
   visibility: visible;
   opacity: 1;
   transform: translateX(0);
@@ -226,11 +230,14 @@
 .sheetHost[data-narrow] .collectionPanes {
   grid-template-columns: minmax(0, 1fr);
 }
+.sheetHost[data-narrow] .sheetFeed {
+  max-width: 100%;
+}
 
 .sheetHost[data-narrow]
   .collectionPanes:not([data-detail-selected])
   .sheetFeed {
-  width: 100%;
+  min-width: 100%;
 }
 
 .sheetHost[data-narrow] .collectionDetail {
@@ -267,7 +274,6 @@
   display: flex;
   position: absolute;
   inset: 0 auto 0 0;
-  width: min(22rem, 100%);
   z-index: 2;
   background: var(--surface-panel);
   box-shadow: var(--elevation-dock);

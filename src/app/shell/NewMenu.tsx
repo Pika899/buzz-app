@@ -75,9 +75,9 @@ function ReadyNewMenu({
   };
   const scope = splitPartition(session.scope);
   const current = () => relay.snapshot().session === session;
-  // + opens the To composer; its context menu keeps the other creations.
+  // Team creation uses its inline composer; the keyboard shortcut keeps the global picker.
   const [menuOpen, setMenuOpen] = useState(false);
-  const compose = () => {
+  const compose = (global = false) => {
     if (scope && current())
       void navigator.open({
         version: 1,
@@ -85,7 +85,10 @@ function ReadyNewMenu({
         pluginId: "buzz.channels",
         pageId: "channels",
         scope,
-        route: { version: 1, params: "new-message" },
+        route: {
+          version: 1,
+          params: global ? "new-message" : { compose: "new" },
+        },
       });
   };
   // The shell's Cmd/Ctrl+N asks to open creation: that is the composer now.
@@ -93,7 +96,7 @@ function ReadyNewMenu({
   useEffect(() => {
     if (!open) return;
     onOpenChange?.(false);
-    if (available) compose();
+    if (available) compose(true);
   }, [open]);
   const menuTrigger = (
     <IconButton
@@ -108,7 +111,7 @@ function ReadyNewMenu({
       icon={
         <PlusIcon className={styles.createIcon} size={16} strokeWidth={2} />
       }
-      onClick={compose}
+      onClick={() => compose()}
       onContextMenu={(event) => {
         event.preventDefault();
         openMenu(event.currentTarget);
@@ -162,7 +165,7 @@ function ReadyNewMenu({
           <MenuSeparator />
           <MenuGroup>
             <MenuGroupLabel emphasis="quiet">Team</MenuGroupLabel>
-            <MenuItem disabled={!scope} onClick={compose}>
+            <MenuItem disabled={!scope} onClick={() => compose()}>
               New DM
             </MenuItem>
             <MenuItem

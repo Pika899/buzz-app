@@ -195,6 +195,7 @@ export function MessagesIndex({
                 : messagesSheetRoute
             }
             detail={detail}
+            draftKind={collection === "solo" ? "solo" : "team"}
           >
             {() => list(collection, listNavigator)}
           </InboxSheet>

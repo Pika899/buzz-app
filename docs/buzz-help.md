@@ -337,16 +337,28 @@ revokes all of them, and a pairing unused for 30 days expires.
   add at least one project folder; the form shows a message beside Folders
   until you add one or turn worktree mode off.
 - **Activity** is the default landing view. The visible filter strip below its title selects All, Channels, Threads,
-  Mentions, DMs or Reactions.
+  Mentions, DMs or Reactions. The sidebar’s **Agents** card shows up to four of your
+  non-archived agents that are eligible to message in the current community,
+  ranked by your usage; older library entries alone do not qualify. Like Pins,
+  it displays an avatar grid. Agents remain here when pinned or placed in another
+  sidebar section. Hover or focus an avatar for its name; click to open
+  its DM. Bundled agent artwork animates here, with still images for reduced motion
+  or unavailable playback.
   Direct, Working and Waiting use the same conversation
   views as Team; the filter icon before All chooses whose activity to show and whether
   to show unread only. Team, Activity, and Solo keep the list on the left and the
-  selected conversation on the right. **View more** opens the list by default;
+  selected conversation on the right. Click a sidebar card’s title or **View more**
+  to open its full list. Use the card’s grabber to reorder it. **View more** opens the list by default;
   sidebar chat rows, chat pins, and direct conversation links open with the list
   collapsed. Use the sidebar toggle at the left of the conversation header to
-  show or hide the list without leaving the chat. A chat assigned to a sidebar section
+  show or hide the list without leaving the chat. Drag the list’s right edge to
+  resize it; double-click the divider to reset its width. Team, Solo, and Activity
+  share the saved list width. A chat assigned to a sidebar section
   shows that section's rows and title. Expanded Pins and custom-section lists show
-  one-line conversation previews, like Team and Activity. Pointer toggles slide the list in and out;
+  one-line conversation previews, like Team and Activity. Team’s new-message pane and card’s **+** open a composer where you can
+  @mention recipients and write a message. Cmd/Ctrl+N opens the global recipient
+  search with the Solo/Team choice. Solo’s new-chat pane uses the same agent
+  composer, saved draft, and chat settings as **New Solo chat**. Its header centers the selected agent’s avatar and name, with the list toggle on the left. Pointer toggles slide the list in and out;
   keyboard toggles and reduced-motion preferences change it immediately. Selecting a list row keeps it
   open on wide windows; narrow windows show it over the reader and close it after selection.
   Activity’s Close or Escape clears the detail while keeping its draft; explicit

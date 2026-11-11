@@ -2261,7 +2261,7 @@
      applying nested shared selectors inside CSS Modules would rename their targets. */
   .buzz-sidebar-navigation {
     display: contents;
-    --affordance-navigation-quiet: var(--affordance-sidebar-hover);
+    --affordance-navigation-quiet: var(--affordance-subtle-hover);
     --affordance-navigation-selected: var(--surface-sidebar-selected);
     --text-row: var(--text-sidebar-hover);
     --text-row-subtle: var(--text-sidebar-hover);

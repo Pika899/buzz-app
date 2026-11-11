@@ -32,6 +32,7 @@ import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { PlusIcon, XIcon } from "../../shared/design-system/icons";
 import { PanelFrame } from "../../features/panels/PanelFrame";
+import { ResizableSidebar } from "../../features/channel-navigation/ResizableSidebar";
 import { NewMessage } from "../../features/direct-messages/NewMessage";
 import { SoloDraft } from "../../features/solo/SoloDraft";
 import { ConversationPresentation } from "../../features/conversation/ConversationPresentation";
@@ -92,11 +93,13 @@ export function InboxSheet({
   extensions,
   navigation,
   detail,
+  draftKind,
   route = activitySheetRoute,
 }: PageTabsProps & {
   navigation?: PageNavigation | undefined;
   /** Existing full conversation workspace for direct chat destinations. */
   detail?: ReactNode;
+  draftKind?: "team" | "solo";
   route?: typeof activitySheetRoute;
   host: ConversationHostServices;
   extensions: ConversationExtensions;
@@ -522,8 +525,10 @@ export function InboxSheet({
             data-list-open={listVisibility?.open ?? true}
             data-list-animate={listVisibility?.animate ? "" : undefined}
           >
-            <div
-              className={styles.sheetFeed}
+            <ResizableSidebar
+              scope={`${scope}:collection-list`}
+              defaultWidth={352}
+              className={styles.sheetFeed ?? ""}
               id={listVisibility?.controls}
               aria-hidden={listVisibility ? !listVisibility.open : undefined}
               inert={listVisibility ? !listVisibility.open : undefined}
@@ -556,7 +561,7 @@ export function InboxSheet({
                   <ConversationListToggle inList />
                 </div>
               )}
-            </div>
+            </ResizableSidebar>
             <section
               ref={reader}
               className={styles.collectionDetail}
@@ -585,24 +590,26 @@ export function InboxSheet({
                     className={styles.draftContent}
                     hidden={shown}
                   >
-                    <PanelHeader
-                      title="New message"
-                      navigation={
-                        listVisibility ? (
-                          <ConversationListToggle />
-                        ) : (
-                          narrow && (
-                            <IconButton
-                              size="sm"
-                              variant="subtle"
-                              aria-label="Close new message"
-                              icon={<XIcon size={16} />}
-                              onClick={dismiss}
-                            />
+                    {draftKind !== "solo" && (
+                      <PanelHeader
+                        title="New message"
+                        navigation={
+                          listVisibility ? (
+                            <ConversationListToggle />
+                          ) : (
+                            narrow && (
+                              <IconButton
+                                size="sm"
+                                variant="subtle"
+                                aria-label="Close new message"
+                                icon={<XIcon size={16} />}
+                                onClick={dismiss}
+                              />
+                            )
                           )
-                        )
-                      }
-                    />
+                        }
+                      />
+                    )}
                     <ConversationPresentation
                       value={
                         presented &&
@@ -610,51 +617,80 @@ export function InboxSheet({
                         (!narrow || drafting || listVisibility?.open === false)
                       }
                     >
-                      <NewMessage
-                        layout="composer"
-                        expanded
-                        onAddressed={expandDraft}
-                        allowChannels
-                        session={session}
-                        scope={scope}
-                        channels={list.channels}
-                        host={detailHost}
-                        extensions={extensions}
-                        onStarted={showConversation}
-                        onOpenThread={(channelId, messageId, threadId) => {
-                          open({ channelId, messageId, threadId });
-                        }}
-                        onOpenChat={showConversation}
-                        renderSolo={(agent, focusRequest, onDraftChange) => (
-                          <SoloDraft
-                            key={agent}
-                            embedded
-                            draftPrefix="direct-message"
-                            onDraftChange={onDraftChange}
-                            agent={agent}
-                            focusRequest={focusRequest}
-                            session={session}
-                            scope={scope}
-                            extensions={extensions}
-                            onStarted={showConversation}
-                            onFailed={(_id, message, retry) =>
-                              notify(
-                                message,
-                                "error",
-                                retry
-                                  ? {
-                                      label: "Retry restoring message",
-                                      onClick: () => {
-                                        void retry();
-                                      },
-                                      timeout: Infinity,
+                      {draftKind === "solo" ? (
+                        <SoloDraft
+                          navigation={<ConversationListToggle />}
+                          session={session}
+                          scope={scope}
+                          extensions={extensions}
+                          onStarted={showConversation}
+                          onFailed={(_id, message, retry) =>
+                            notify(
+                              message,
+                              "error",
+                              retry
+                                ? {
+                                    label: "Retry restoring message",
+                                    onClick: () => {
+                                      void retry();
+                                    },
+                                    timeout: Infinity,
+                                  }
+                                : undefined,
+                            )
+                          }
+                        />
+                      ) : (
+                        <NewMessage
+                          layout="composer"
+                          expanded
+                          onAddressed={expandDraft}
+                          allowChannels
+                          session={session}
+                          scope={scope}
+                          channels={list.channels}
+                          host={detailHost}
+                          extensions={extensions}
+                          onStarted={showConversation}
+                          onOpenThread={(channelId, messageId, threadId) => {
+                            open({ channelId, messageId, threadId });
+                          }}
+                          onOpenChat={showConversation}
+                          renderSolo={
+                            draftKind === "team"
+                              ? undefined
+                              : (agent, focusRequest, onDraftChange) => (
+                                  <SoloDraft
+                                    key={agent}
+                                    embedded
+                                    draftPrefix="direct-message"
+                                    onDraftChange={onDraftChange}
+                                    agent={agent}
+                                    focusRequest={focusRequest}
+                                    session={session}
+                                    scope={scope}
+                                    extensions={extensions}
+                                    onStarted={showConversation}
+                                    onFailed={(_id, message, retry) =>
+                                      notify(
+                                        message,
+                                        "error",
+                                        retry
+                                          ? {
+                                              label: "Retry restoring message",
+                                              onClick: () => {
+                                                void retry();
+                                              },
+                                              timeout: Infinity,
+                                            }
+                                          : undefined,
+                                      )
                                     }
-                                  : undefined,
-                              )
-                            }
-                          />
-                        )}
-                      />
+                                  />
+                                )
+                          }
+                        />
+                      )}
                     </ConversationPresentation>
                   </div>
                   {available && channel && target && tab && (

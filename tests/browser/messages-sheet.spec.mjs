@@ -198,7 +198,15 @@ test("Messages keeps its list beside conversations and preserves drafts and hist
     name: "New message",
     exact: true,
   });
-  await newMessage.getByRole("textbox").fill("@Alice");
+  await expect(
+    newMessage.getByRole("combobox", { name: "Message recipients" }),
+  ).toHaveCount(0);
+  await expect(
+    newMessage.getByRole("tablist", { name: "Conversation", exact: true }),
+  ).toHaveCount(0);
+  await newMessage
+    .getByRole("textbox", { name: "New message", exact: true })
+    .fill(`@${app.participants[0]}`);
   await page.getByRole("option", { name: /Alice Fixture/ }).click();
   await expect(
     newMessage.getByText("Inbox DM fixture reply", { exact: true }),
@@ -272,6 +280,23 @@ test("conversation lists default closed for direct opens and open for View more"
   await expect(detail.locator('[data-channel-timeline="alpha"]')).toBeVisible();
   await page.goForward();
   await expect(row).toBeVisible();
+  await rail.getByRole("button", { name: "New", exact: true }).click();
+  await expect(
+    detail.getByRole("button", { name: "Show Team list", exact: true }),
+  ).toBeVisible();
+  await expect(
+    detail.getByRole("textbox", { name: "New message", exact: true }),
+  ).toBeEditable();
+  await expect(
+    page.getByRole("combobox", { name: "Message recipients" }),
+  ).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+n");
+  await expect(
+    page.getByRole("combobox", { name: "Message recipients" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("tablist", { name: "Conversation", exact: true }),
+  ).toBeVisible();
 });
 
 // Real rail membership, navigation history and the reader must agree on the
@@ -498,4 +523,140 @@ test("hamburger motion reverses smoothly and skips keyboard and reduced motion",
   expect(
     await reader.evaluate((element) => element.getAnimations().length),
   ).toBe(0);
+});
+
+// The divider must resize the mounted list, without navigating or remounting its reader.
+test("collection list resizing preserves the conversation and saved width", async ({
+  page,
+  app,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 950 });
+  await page.goto(app.origin);
+  const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+  await rail
+    .getByRole("button", { name: "View more team", exact: true })
+    .click();
+  const team = page.getByRole("region", { name: "Team", exact: true });
+  await team
+    .locator('[data-activity-row="alpha"] [data-conversation-row]')
+    .click();
+  const editor = team.getByRole("textbox", { name: /^Message/ });
+  await editor.fill("Keep this draft while resizing");
+  const divider = team.getByRole("separator", {
+    name: "Resize sidebar",
+    exact: true,
+  });
+  await expect(divider).toBeVisible();
+  const initial = Number(await divider.getAttribute("aria-valuenow"));
+  const box = await divider.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect(divider).toHaveAttribute("aria-valuenow", String(initial + 80));
+  await expect(editor).toHaveText("Keep this draft while resizing");
+  await team
+    .getByRole("button", { name: "Hide Team list", exact: true })
+    .click();
+  await expect(divider).toBeHidden();
+  await team
+    .getByRole("button", { name: "Show Team list", exact: true })
+    .click();
+  await expect(divider).toHaveAttribute("aria-valuenow", String(initial + 80));
+  await divider.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(divider).toHaveAttribute("aria-valuenow", String(initial + 64));
+  await page.reload();
+  await rail
+    .getByRole("button", { name: "View more team", exact: true })
+    .click();
+  await expect(divider).toHaveAttribute("aria-valuenow", String(initial + 64));
+  await divider.dblclick();
+  await expect(divider).toHaveAttribute("aria-valuenow", String(initial));
+});
+
+// dnd-kit collision detection and the clipped scrollport require a layout engine.
+test("rail cards can drop at the top without adding a gap", async ({
+  page,
+  app,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  await page.goto(app.origin);
+  const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+  const cards = rail.locator("[data-rail-section]");
+  await expect(cards.first()).toBeVisible();
+  const firstId = await cards.first().getAttribute("data-rail-section");
+  const source = cards.nth(1);
+  const movedId = await source.getAttribute("data-rail-section");
+  const grabber = source.getByRole("button", { name: /^Move .* section$/ });
+  const grab = await grabber.boundingBox();
+  const first = await cards.first().boundingBox();
+  await page.mouse.move(grab.x + grab.width / 2, grab.y + grab.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    grab.x + grab.width / 2 + 10,
+    grab.y + grab.height / 2,
+    { steps: 3 },
+  );
+  await page.mouse.move(first.x + first.width / 2, first.y + 2, { steps: 12 });
+  const target = rail.locator('[aria-hidden="true"][data-drop-target]');
+  await expect(target).toBeVisible();
+  expect((await target.locator("..").boundingBox()).y).toBe(first.y);
+  await expect
+    .poll(() =>
+      target.evaluate((node) =>
+        Number(getComputedStyle(node, "::after").opacity),
+      ),
+    )
+    .toBe(1);
+  await page.mouse.up();
+  await expect(cards.first()).toHaveAttribute("data-rail-section", movedId);
+  await expect(cards.nth(1)).toHaveAttribute("data-rail-section", firstId);
+  await page.reload();
+  await expect(cards.first()).toHaveAttribute("data-rail-section", movedId);
+  await cards
+    .first()
+    .getByRole("button", { name: "Pins", exact: true })
+    .click();
+  await expect(
+    page
+      .getByRole("region", { name: "Pins", exact: true })
+      .getByRole("heading", { name: "Pins", exact: true }),
+  ).toBeVisible();
+});
+
+// The collection must mount the same saved Solo draft and settings as its card's +.
+test("Solo collection and card plus share the new-chat composer", async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.origin);
+  const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+  const card = rail.locator('[data-rail-section="solo"]');
+  await card.getByRole("button", { name: "Solo", exact: true }).click();
+  const solo = page.getByRole("region", { name: "Solo", exact: true });
+  const draft = solo.getByRole("region", { name: "New chat", exact: true });
+  const editor = draft.getByRole("textbox", {
+    name: "Message your agents",
+    exact: true,
+  });
+  await editor.fill("Keep the same Solo draft");
+  await expect(
+    draft.getByRole("button", { name: "Chat settings", exact: true }),
+  ).toBeVisible();
+  await expect(
+    solo.getByRole("combobox", { name: "Message recipients" }),
+  ).toHaveCount(0);
+  await solo
+    .getByRole("button", { name: "Hide Solo list", exact: true })
+    .click();
+  await expect(editor).toHaveText("Keep the same Solo draft");
+  await card
+    .getByRole("button", { name: "New Solo chat", exact: true })
+    .click();
+  await expect(editor).toHaveText("Keep the same Solo draft");
+  await card.getByRole("button", { name: "Solo", exact: true }).click();
+  await expect(editor).toHaveText("Keep the same Solo draft");
 });

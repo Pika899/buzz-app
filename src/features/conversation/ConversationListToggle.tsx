@@ -20,35 +20,42 @@ export function ConversationListToggle({
   if (!list) return null;
   const label = `${list.open ? "Hide" : "Show"} ${list.label} list`;
   return (
-    <IconButton
-      size="sm"
-      variant="subtle"
-      data-highlight-expanded="false"
-      aria-label={label}
-      title={label}
-      aria-controls={list.controls}
-      aria-expanded={list.open}
-      icon={<MenuIcon size={18} />}
-      onClick={(event) => {
-        list.setOpen(!list.open, event.detail > 0);
-        if (inList && list.open) {
-          const panel = document.getElementById(list.controls)?.parentElement;
-          const reader = panel?.querySelector(
-            '[aria-label="Conversation detail"]',
-          );
-          Array.from(
-            reader?.querySelectorAll<HTMLButtonElement>(
-              "button[aria-controls]",
-            ) ?? [],
-          )
-            .find(
-              (button) =>
-                button.getAttribute("aria-controls") === list.controls &&
-                button.getClientRects().length > 0,
+    <span className="flex min-w-0 items-center gap-2">
+      <IconButton
+        size="sm"
+        variant="subtle"
+        data-highlight-expanded="false"
+        aria-label={label}
+        title={label}
+        aria-controls={list.controls}
+        aria-expanded={list.open}
+        icon={<MenuIcon size={18} />}
+        onClick={(event) => {
+          list.setOpen(!list.open, event.detail > 0);
+          if (inList && list.open) {
+            const panel = document.getElementById(list.controls)?.parentElement;
+            const reader = panel?.querySelector(
+              '[aria-label="Conversation detail"]',
+            );
+            Array.from(
+              reader?.querySelectorAll<HTMLButtonElement>(
+                "button[aria-controls]",
+              ) ?? [],
             )
-            ?.focus({ preventScroll: true });
-        }
-      }}
-    />
+              .find(
+                (button) =>
+                  button.getAttribute("aria-controls") === list.controls &&
+                  button.getClientRects().length > 0,
+              )
+              ?.focus({ preventScroll: true });
+          }
+        }}
+      />
+      {!list.open && (
+        <span className="truncate text-label-sm text-standard">
+          {list.label}
+        </span>
+      )}
+    </span>
   );
 }

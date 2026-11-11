@@ -1,4 +1,9 @@
-import { useLayoutEffect, useState, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import {
   readView,
   subscribeView,
@@ -70,7 +75,8 @@ export function ResizableSidebar({
   className = "shell-sidebar-default",
   defaultWidth = SIDEBAR_DEFAULT_WIDTH,
   children,
-}: {
+  ...props
+}: Pick<ComponentProps<"div">, "id" | "aria-hidden" | "inert"> & {
   scope: string;
   className?: string;
   /** A host's comfortable width; saved user choices still take precedence. */
@@ -108,7 +114,11 @@ export function ResizableSidebar({
   };
   return (
     <>
-      <div className={`${className} ${styles.sidebar}`} style={{ width }}>
+      <div
+        {...props}
+        className={`${className} ${styles.sidebar}`}
+        style={{ width }}
+      >
         {children}
       </div>
       <ResizeHandle

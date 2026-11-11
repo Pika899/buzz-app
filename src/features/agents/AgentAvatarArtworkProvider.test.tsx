@@ -56,3 +56,19 @@ it("preserves ordinary image loading and fallback for unrecognized portraits", (
   expect(avatar).toHaveTextContent("P");
   expect(avatar.querySelector("img")).toBeNull();
 });
+
+it("animates recognized artwork only when its host opts in", () => {
+  const pack = agentAvatars[0];
+  if (!pack) throw new Error("Missing avatar fixture");
+  const portrait = (animated: boolean) => (
+    <AgentAvatarArtworkProvider animated={animated}>
+      <Avatar src={pack.url} alt="Sidebar agent" fallback="Agent" size="fill" />
+    </AgentAvatarArtworkProvider>
+  );
+  const view = render(portrait(true));
+  const avatar = view.getByRole("img", { name: "Sidebar agent" });
+  expect(avatar.querySelector("video")).not.toBeNull();
+  view.rerender(portrait(false));
+  expect(avatar.querySelector("video")).toBeNull();
+  expect(avatar.querySelector("img")).toHaveAttribute("src", pack.preview);
+});

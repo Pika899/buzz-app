@@ -38,7 +38,7 @@
   display: flex;
 }
 .navigationState {
-  display: inline-flex;
+  display: flex;
   align-items: center;
 }
 .navigationAvatar {
@@ -64,6 +64,10 @@
 [data-conversation-row]:not([data-variant="avatar"]) {
   height: auto;
   min-height: 0;
+}
+
+.frame[data-layout="navigation"] [data-conversation-row] {
+  align-items: center;
 }
 
 .row {

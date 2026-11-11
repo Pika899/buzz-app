@@ -296,6 +296,10 @@ export type MessageComposerProps = {
   ownSoloConversation?: boolean | undefined;
   /** Seeds an empty draft, or an unaddressed submission that requires a recipient. */
   defaultMention?: MentionRecipient | undefined;
+  /** Effective first recipient for a host’s draft conversation identity. */
+  onPrimaryRecipientChange?:
+    | ((recipient: MentionRecipient | null) => void)
+    | undefined;
   /** Whether a retained tab shows this composer, apart from its read policy.
    * A composer shown again may reseed its remembered agents (see seedMentions). */
   shown?: boolean | undefined;
@@ -526,6 +530,7 @@ function Composer({
   soloConversation,
   ownSoloConversation = false,
   defaultMention,
+  onPrimaryRecipientChange,
   shown = true,
   requireMention = false,
   chatPresentation = false,
@@ -1153,6 +1158,15 @@ function Composer({
   /** Who hears this message: inline mentions win; without any, the toolbar's
    * agents stand in. */
   const addressed = routing && !recipients.length ? routed : recipients;
+  const primaryRecipient = addressed[0];
+  const reportPrimaryRecipient = useEffectEvent(
+    (pubkey?: string, name?: string) => {
+      onPrimaryRecipientChange?.(pubkey && name ? { pubkey, name } : null);
+    },
+  );
+  useEffect(() => {
+    reportPrimaryRecipient(primaryRecipient?.pubkey, primaryRecipient?.name);
+  }, [primaryRecipient?.pubkey, primaryRecipient?.name]);
   // The agents a send addresses: model, effort and session controls are
   // offered for each, so a one-to-one DM with an agent always has them.
   const addressedKeys = sessionTargets(addressed.map((item) => item.pubkey));

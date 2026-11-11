@@ -266,6 +266,9 @@ it.each(["solo", "direct-message"])(
     expect(
       screen.queryByRole("button", { name: "Choose an agent" }),
     ).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Outside agent" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("textbox"));
     await user.keyboard("{Enter}");
     await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
@@ -853,6 +856,11 @@ it("a pick after a refused start's agent comes back replaces it, unsaved", async
   await waitFor(() => expect(sendingTo("Member agent")).toBeInTheDocument());
   await user.click(
     screen.getByRole("button", { name: "Send to Outside agent" }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("heading", { name: "Outside agent" }),
+    ).toBeInTheDocument(),
   );
   await user.type(screen.getByRole("textbox"), "Hello");
   await user.click(screen.getByRole("button", { name: "Send message" }));

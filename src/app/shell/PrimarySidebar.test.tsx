@@ -312,7 +312,7 @@ it("filters the combined sidebar without navigating or resetting Solo sections",
     pluginId: "buzz.channels",
     pageId: "channels",
     scope: { viewer, communityOrigin: "https://relay.test" },
-    route: { version: 1, params: "new-message" },
+    route: { version: 1, params: { compose: "new" } },
   });
 });
 
@@ -813,14 +813,14 @@ it.each(["empty", "chats", "projects", "both"])(
   },
 );
 
-it("opens the To composer when + is clicked", async () => {
+it("opens the Team composer when + is clicked", async () => {
   const user = userEvent.setup();
   const f = fixture(true);
   await user.click(screen.getByRole("button", { name: "New" }));
   expect(f.open).toHaveBeenLastCalledWith(
     expect.objectContaining({
       pluginId: "buzz.channels",
-      route: { version: 1, params: "new-message" },
+      route: { version: 1, params: { compose: "new" } },
     }),
   );
   expect(screen.queryByRole("menu")).toBeNull();

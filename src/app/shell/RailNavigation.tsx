@@ -19,6 +19,7 @@ import { targetKey } from "../../features/navigation/targets";
 import type { Navigation } from "../../features/navigation/controller";
 import type { RegisteredPage } from "../../features/pages/service";
 import { useAgentChoices } from "../../features/agents/use-choices";
+import { AgentAvatarArtworkProvider } from "../../features/agents/AgentAvatarArtworkProvider";
 import { canMessageAgent } from "../../features/agents/choices";
 import { archiveHides } from "../../features/relay/identity-archives";
 import { readSearchUsage } from "../../features/search/usage";
@@ -222,7 +223,7 @@ export function RailNavigation({
   );
   const agentEntries = useMemo(
     (): RailEntry[] =>
-      agents.selectable.map((agent) => ({
+      agents.selectable.filter(canMessageAgent).map((agent) => ({
         id: `agent:${agent.pubkey}`,
         label: agent.managedName ?? agent.name,
         picture: agent.avatar,
@@ -428,6 +429,23 @@ export function RailNavigation({
           fallback={entry.label}
         />
       );
+    if (entry.kind === "chat" && !avatarOnly) {
+      const agent = agents.identities.find((agent) =>
+        channel?.members?.includes(agent.pubkey),
+      );
+      return (
+        <Avatar
+          size="compact"
+          shape="squircle"
+          src={avatarMedia(
+            agent?.avatar ?? (agent && profiles.get(agent.pubkey)?.picture),
+            session.media,
+          )}
+          alt=""
+          fallback={agent?.name ?? entry.label}
+        />
+      );
+    }
     const Icon = entry.kind === "chat" ? ChatCircleIcon : StorefrontIcon;
     return entry.kind === "channel" ? (
       <ChannelAvatar
@@ -529,7 +547,10 @@ export function RailNavigation({
 
   const sourceRow = (entry: RailEntry, section: string) => (
     <RailSourceRow key={entry.id} section={section} entry={entry}>
-      {row(entry, section === "pins" && pageSection !== "pins")}
+      {row(
+        entry,
+        (section === "pins" || section === "agents") && pageSection !== section,
+      )}
     </RailSourceRow>
   );
 
@@ -759,8 +780,8 @@ export function RailNavigation({
             )?.focus();
         }}
         renderEntry={(entry, section) => {
-          if (section === "pins")
-            return row(byId.get(entry.id) ?? entry, pageSection !== "pins");
+          if (section === "pins" || section === "agents")
+            return row(byId.get(entry.id) ?? entry, pageSection !== section);
           const contribution = contributed.find((section) =>
             entry.id.startsWith(`contributed:${section.key}:`),
           );
@@ -987,26 +1008,29 @@ export function RailNavigation({
             title: "Agents",
             icon: <RobotIcon size={22} />,
             content: (
-              <RailGroup
-                id="agents"
-                title="Agents"
-                footer={
-                  <NavigationItem
-                    label="View more"
-                    data-rail-view-more=""
-                    aria-label="View more agents"
-                    icon={<ArrowRightIcon size={18} />}
-                    onClick={() => onSelect("buzz.agents/agents")}
-                  />
-                }
-              >
-                {topAgents.map((entry) => sourceRow(entry, "agents"))}
-                {!topAgents.length && (
-                  <p className={styles.note}>
-                    {agents.pending ? "Loading agents…" : "No agents yet."}
-                  </p>
-                )}
-              </RailGroup>
+              <AgentAvatarArtworkProvider animated={!pageSection}>
+                <RailGroup
+                  avatarGrid
+                  id="agents"
+                  title="Agents"
+                  footer={
+                    <NavigationItem
+                      label="View more"
+                      data-rail-view-more=""
+                      aria-label="View more agents"
+                      icon={<ArrowRightIcon size={18} />}
+                      onClick={() => onSelect("buzz.agents/agents")}
+                    />
+                  }
+                >
+                  {topAgents.map((entry) => sourceRow(entry, "agents"))}
+                  {!topAgents.length && (
+                    <p className={styles.note}>
+                      {agents.pending ? "Loading agents…" : "No agents yet."}
+                    </p>
+                  )}
+                </RailGroup>
+              </AgentAvatarArtworkProvider>
             ),
           },
           ...contributed.map((section) => ({

@@ -2097,33 +2097,33 @@ function ChannelWorkspace({
               : "Select a channel to read it."}
           </div>
         )}
-        {current &&
-          channelNotice &&
-          (current.messagePublisher !== undefined && !current.archived ? (
-            <div className="text-body-sm text-subtle p-4" role="status">
-              Open a post by the channel publisher to reply.
-            </div>
-          ) : (
-            <ChannelJoinNotice
-              key={`join:${current.id}`}
-              ready={contentReadyChannel === current.id}
-              channelId={current.id}
-              archived={!!current.archived}
-              place={solo ? "chat" : "channel"}
-              guest={current.viewerRole === "guest"}
-              joinRole={current.joinRole}
-              lifecycle={queries.channelLifecycle}
-              joinable={
-                !current.archived &&
-                (current.channelType === "stream" ||
-                  current.channelType === "forum" ||
-                  (current.channelType === "solo" &&
-                    current.joinRole === "guest"))
-              }
-              onJoin={() => setJoiningChannel(current.id)}
-              onHeightChange={setJoinNoticeHeight}
-            />
-          ))}
+        {current && channelNotice && (
+          <ChannelJoinNotice
+            key={`join:${current.id}`}
+            ready={contentReadyChannel === current.id}
+            channelId={current.id}
+            archived={!!current.archived}
+            message={
+              !current.archived && current.messagePublisher !== undefined
+                ? "Open a post by the channel publisher to reply."
+                : undefined
+            }
+            place={solo ? "chat" : "channel"}
+            guest={current.viewerRole === "guest"}
+            joinRole={current.joinRole}
+            lifecycle={queries.channelLifecycle}
+            joinable={
+              !current.archived &&
+              !!current.readOnly &&
+              (current.channelType === "stream" ||
+                current.channelType === "forum" ||
+                (current.channelType === "solo" &&
+                  current.joinRole === "guest"))
+            }
+            onJoin={() => setJoiningChannel(current.id)}
+            onHeightChange={setJoinNoticeHeight}
+          />
+        )}
       </section>
       {!cached && (
         <LiveStatus

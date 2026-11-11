@@ -718,7 +718,8 @@ impl Git {
         if let Some(socket) = &self.ssh_auth_sock {
             command.env("SSH_AUTH_SOCK", socket);
         }
-        let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        // Git for Windows accepts `/dev/null` as the null device but rejects `NUL` here.
+        let null = "/dev/null";
         command
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", null)

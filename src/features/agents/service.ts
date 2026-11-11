@@ -1321,6 +1321,8 @@ export type NewAgent = Readonly<{
 }>;
 export type Agents = {
   registerSessionRouter(router: AgentSessionRouter): void;
+  /** Display capability for a source thread. This does not grant write access. */
+  canReplyInThread(source: AgentSessionSource): Promise<boolean>;
   registerExecution(provider: AgentExecutionProvider): void;
   /** Select the adapter while the agent is idle. This is write-once. */
   bindExecution(
@@ -2100,6 +2102,7 @@ export class AgentsService extends Service implements Agents {
     this.sessionAdmissions = createSessionAdmissions(
       ctx,
       executionStorage(storage),
+      () => this.notify(),
     );
     this.executions = createAgentExecutions(ctx, executionStorage(storage));
     this.contributions = createContributions<HostedAgentType>(ctx);
@@ -4558,6 +4561,9 @@ export class AgentsService extends Service implements Agents {
       runtime: agent.type,
       prior: this.rowOf(origin, pubkey)?.prior,
     });
+  }
+  canReplyInThread(source: AgentSessionSource) {
+    return this.sessionAdmissions.canReply(source);
   }
   private sessionPlace(
     agent: Agent,

@@ -43,7 +43,7 @@ async function setup(
     isActive: () => true,
     subscribe: () => () => {},
   });
-  const admissions = createSessionAdmissions(root, storage);
+  const admissions = createSessionAdmissions(root, storage, () => {});
   const prepare = vi.fn(async (input: AgentSessionAdmission) => ({
     association: input.association ?? { task: input.sessionKey },
     context: "Session context",
@@ -188,4 +188,22 @@ it("rejects an unverified thread before plugin preparation", async () => {
     }),
   ).rejects.toThrow("verified root");
   expect(f.prepare).not.toHaveBeenCalled();
+});
+
+it("queries shared thread capability before any native admission", async () => {
+  const ready = gate();
+  const allows = vi.fn(async () => true);
+  const subscribe = vi.fn(() => () => {});
+  const f = await setup({
+    ready: () => ready.promise,
+    threadReplies: { allows, subscribe },
+  });
+  const result = f.admissions.canReply(source);
+  expect(allows).not.toHaveBeenCalled();
+  ready.resolve();
+  expect(await result).toBe(true);
+  expect(allows).toHaveBeenCalledWith(source);
+  expect(subscribe).toHaveBeenCalledOnce();
+  expect(f.prepare).not.toHaveBeenCalled();
+  expect(f.storage.keys()).toEqual([]);
 });

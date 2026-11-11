@@ -1,4 +1,5 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The thread region supports keyboard scrolling and Escape.
+import { AgentsContext } from "../agents/react";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
 import { ActivityExpansion } from "./ActivityExpansion";
@@ -29,6 +30,7 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -72,7 +74,7 @@ export type ThreadPanelProps = {
   scope: string;
   channelName: string;
   channelId: string;
-  /** Solo agents answer at top level, so a Solo thread is read-only. */
+  /** Solo threads need an installed router to enable replies. */
   soloConversation?: boolean | undefined;
   disabled?: boolean | undefined;
   messageId: string;
@@ -544,7 +546,7 @@ function ThreadMessages({
   routePending?: boolean | undefined;
   /** A same-thread link that couldn't open; the current thread stays usable. */
   selectionFailure?: SelectionFailure | undefined;
-  /** Solo agents answer at top level, so a Solo thread is read-only. */
+  /** Solo threads need an installed router to enable replies. */
   soloConversation?: boolean | undefined;
   disabled?: boolean | undefined;
   extensions?: ConversationExtensions | undefined;
@@ -604,6 +606,42 @@ function ThreadMessages({
     view.snapshot,
     view.snapshot,
   );
+  const agents = useContext(AgentsContext);
+  const root = snapshot.root?.id;
+  const [replyAccess, setReplyAccess] = useState<{
+    root: string;
+    allowed: boolean;
+    error?: string;
+  }>();
+  useEffect(() => {
+    if (!soloConversation || !agents || !root) return;
+    let generation = 0;
+    const check = () => {
+      const current = ++generation;
+      void agents.canReplyInThread({ channelId, root }).then(
+        (allowed) => {
+          if (current === generation) setReplyAccess({ root, allowed });
+        },
+        () => {
+          if (current === generation)
+            setReplyAccess({
+              root,
+              allowed: false,
+              error: "Thread reply access could not be checked.",
+            });
+        },
+      );
+    };
+    const stop = agents.subscribe(check);
+    check();
+    return () => {
+      generation++;
+      stop();
+    };
+  }, [agents, channelId, root, soloConversation]);
+  const canReply =
+    !soloConversation ||
+    (!!agents && replyAccess?.root === root && replyAccess?.allowed);
   const threadChannels = useMemo(() => new Set([channelId]), [channelId]);
   const activitySnapshot = useChannelActivitySnapshot(
     session.agentActivity,
@@ -1560,9 +1598,7 @@ function ThreadMessages({
             extensions={extensions}
             session={session}
             scope={scope}
-            onReply={
-              snapshot.root && !soloConversation ? targetReply : undefined
-            }
+            onReply={snapshot.root && canReply ? targetReply : undefined}
             row={row}
             getThreadRoot={getThreadRoot}
             stackPrevious={inside || continuation}
@@ -1753,7 +1789,7 @@ function ThreadMessages({
   // The reply composer, and the activity lane its TypingIndicator needs.
   const composerRoot =
     !preview &&
-    !soloConversation &&
+    canReply &&
     (!requireReadyRoot ||
       (snapshot.root?.id === messageId && snapshot.targetStatus === "ready"))
       ? snapshot.root
@@ -1881,7 +1917,7 @@ function ThreadMessages({
               extensions={extensions}
               session={session}
               scope={scope}
-              onReply={soloConversation ? undefined : focusReply}
+              onReply={canReply ? focusReply : undefined}
               stackNext={joinsLive && snapshot.root.id === lastMessage?.id}
               row={snapshot.root}
               representedAgents={stableActivity.agents(
@@ -2034,6 +2070,14 @@ function ThreadMessages({
           onHeightChange={setJoinNoticeHeight}
         />
       )}
+      {soloConversation &&
+        replyAccess &&
+        replyAccess.root === root &&
+        replyAccess.error && (
+          <p className={styles.empty} role="alert">
+            {replyAccess.error}
+          </p>
+        )}
       {composerRoot && (
         <MessageComposer
           onFocusedRemoval={focusArchivedHistory}

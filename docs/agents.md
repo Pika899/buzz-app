@@ -47,6 +47,15 @@ Replies, history, tools, Work and typing then use that thread. A plugin can
 thus select an independent thread in Solo while the project Lead keeps its
 rootless session. With no selected route, the native scope stays in effect.
 
+A router can supply `threadReplies: {allows(source), subscribe(listener)}`.
+This read-only display query can return a promise from a local keyed lookup.
+It shares `ready()` and reports changes through one collection subscription.
+`ctx.agents.canReplyInThread(source)` exposes the result for the current viewer.
+The host uses it to show the existing composer in an eligible Solo thread,
+including on a device with shared task records and no local native admission.
+It does not grant write access or execution authority. The host keeps its
+channel access guards and rejects stale query results.
+
 `ready()` opens only the plugin's local keyed storage. `matches()` selects the
 sources the plugin manages. Exactly one router can match a source. Its
 `prepare()` receives the agent, owner, harness, source, conversation, invocation ID, logical

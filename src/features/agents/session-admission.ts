@@ -48,6 +48,11 @@ export type AgentSessionRouter = Readonly<{
       "agent" | "owner" | "harness" | "source"
     >,
   ): boolean;
+  /** Display capability only. The host keeps write access and execution checks. */
+  threadReplies?: Readonly<{
+    allows(source: AgentSessionSource): boolean | Promise<boolean>;
+    subscribe(listener: () => void): () => void;
+  }>;
   route?(
     input: Omit<AdmissionRequest, "conversation"> &
       Readonly<{ defaultConversation: AgentSessionSource }>,
@@ -114,8 +119,13 @@ const savedKey = (sessionKey: string) =>
   SESSION_ADMISSION_PREFIX + JSON.stringify(["session", sessionKey]);
 
 /** Logical lifetimes survive harness reconnects. Each invocation keeps its own key. */
-export function createSessionAdmissions(root: Context, storage: AgentStore) {
+export function createSessionAdmissions(
+  root: Context,
+  storage: AgentStore,
+  changed: () => void,
+) {
   const routers = createContributions<AgentSessionRouter>(root);
+  root.effect(() => routers.subscribe(changed));
   const pending = new Map<string, Promise<Saved | undefined>>();
   let stopped = false;
   root.effect(() => () => {
@@ -130,6 +140,20 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
       const text = storage.get(routeKey(agent, harness, source));
       return text === null ? undefined : parse<Route>(text).conversation;
     },
+    async canReply(source: AgentSessionSource) {
+      if (!source.root) return false;
+      const candidates = routers
+        .snapshot()
+        .filter((router) => router.threadReplies);
+      const results = await Promise.all(
+        candidates.map(async (router) => {
+          await router.ready();
+          const allowed = await router.threadReplies?.allows(source);
+          return allowed === true && routers.snapshot().includes(router);
+        }),
+      );
+      return results.some(Boolean);
+    },
     register(ctx: Context, router: AgentSessionRouter) {
       if (
         !ctx.pluginOwner ||
@@ -137,12 +161,19 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         typeof router.ready !== "function" ||
         typeof router.matches !== "function" ||
         typeof router.prepare !== "function" ||
-        (router.route !== undefined && typeof router.route !== "function")
+        (router.route !== undefined && typeof router.route !== "function") ||
+        (router.threadReplies !== undefined &&
+          (typeof router.threadReplies.allows !== "function" ||
+            typeof router.threadReplies.subscribe !== "function"))
       )
         throw new Error(
           "A session router needs an id, ready, matches and prepare",
         );
       routers.register(ctx, router);
+      if (router.threadReplies) {
+        const capability = router.threadReplies;
+        ctx.effect(() => capability.subscribe(changed));
+      }
     },
     async resolve(request: AdmissionRequest) {
       check(request.signal);

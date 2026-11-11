@@ -12,6 +12,8 @@ import {
 import { StrictMode } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, expect, it, onTestFinished, vi } from "vitest";
+import { AgentsContext } from "../agents/react";
+import type { Agents } from "../agents/service";
 import { ThreadPanel, type ThreadPanelProps } from "./ThreadPanel";
 import { selectNewestMessage } from "./message-selection";
 import type { MessageRowProps } from "./MessageRow";
@@ -1626,6 +1628,52 @@ it("passes readiness through to thread composition, and gives a Solo thread none
   ).toBeInTheDocument();
 });
 
+it("reveals a Solo thread composer from shared task evidence and rejects stale capability results", async () => {
+  const h = messagesHarness();
+  const listeners = new Set<() => void>();
+  const queries: ((allowed: boolean) => void)[] = [];
+  const canReplyInThread = vi.fn(
+    () => new Promise<boolean>((resolve) => queries.push(resolve)),
+  );
+  const agents = {
+    canReplyInThread,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as Agents;
+  render(
+    <AgentsContext.Provider value={agents}>
+      <ThreadPanel {...h.props} soloConversation />
+    </AgentsContext.Provider>,
+  );
+  expect(canReplyInThread).toHaveBeenCalledWith({
+    channelId: "channel",
+    root: row.id,
+  });
+  expect(
+    screen.queryByRole("region", { name: "Composer" }),
+  ).not.toBeInTheDocument();
+  await act(async () => queries[0]?.(false));
+  act(() => {
+    for (const listener of listeners) listener();
+  });
+  expect(queries).toHaveLength(2);
+  await act(async () => queries[1]?.(true));
+  expect(screen.getByRole("region", { name: "Composer" })).toBeInTheDocument();
+  act(() => {
+    for (const listener of listeners) listener();
+  });
+  act(() => {
+    for (const listener of listeners) listener();
+  });
+  await act(async () => queries[3]?.(false));
+  await act(async () => queries[2]?.(true));
+  expect(
+    screen.queryByRole("region", { name: "Composer" }),
+  ).not.toBeInTheDocument();
+});
+
 it.each([
   { channelType: "stream" as const, joinable: true },
   { channelType: "forum" as const, joinable: true },
@@ -2522,4 +2570,41 @@ it("reveals a completed step selected by an exact thread link", async () => {
   expect(
     screen.getByRole("button", { name: /Collapse activity history/ }),
   ).toBeVisible();
+});
+
+it("keeps an archived Solo thread read-only when its router allows replies", async () => {
+  const h = messagesHarness();
+  Object.assign(h.session, {
+    channels: {
+      list: () => ({
+        status: "ready",
+        channels: [
+          { id: "channel", name: "Solo", channelType: "solo", archived: true },
+        ],
+      }),
+      get: () => ({
+        id: "channel",
+        name: "Solo",
+        channelType: "solo",
+        archived: true,
+      }),
+      subscribeList: () => () => {},
+    },
+  });
+  const canReplyInThread = vi.fn(async () => true);
+  const agents = {
+    canReplyInThread,
+    subscribe: () => () => {},
+  } as unknown as Agents;
+  await act(async () => {
+    render(
+      <AgentsContext.Provider value={agents}>
+        <ThreadPanel {...h.props} soloConversation />
+      </AgentsContext.Provider>,
+    );
+  });
+  expect(canReplyInThread).toHaveBeenCalled();
+  expect(
+    screen.queryByRole("region", { name: "Composer" }),
+  ).not.toBeInTheDocument();
 });

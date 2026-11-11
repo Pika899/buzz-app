@@ -168,3 +168,16 @@ it("uses explicit policy changes, preserving an unchanged publisher and clearing
     }),
   ).toThrow();
 });
+
+it("rejects root-only references from publishers and stored roots", () => {
+  const rootOnly = {
+    ...event,
+    tags: [...event.tags, ["e", "d".repeat(64), "", "root"]],
+  };
+  expect(() =>
+    validatePublisherMessage(channel, rootOnly, publisher, () => undefined),
+  ).toThrow("Root-only");
+  expect(() =>
+    validatePublisherMessage(channel, reply, viewer, () => rootOnly),
+  ).toThrow();
+});

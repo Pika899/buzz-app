@@ -79,7 +79,19 @@ export function validatePublisherMessage(
     original.tags.some(([key]) => key === "broadcast")
   )
     throw new Error("Only the channel publisher can send to the channel");
+  if (event.kind === 40003 && event.tags.some(([key]) => key === "broadcast"))
+    throw new Error("An edit cannot broadcast a message");
   const thread = threadReference(original);
+  if (
+    !thread &&
+    original.tags.some(
+      ([key, value, , marker]) =>
+        key === "e" && marker === "root" && /^[0-9a-f]{64}$/i.test(value ?? ""),
+    )
+  )
+    throw new Error(
+      "Root-only references are unavailable in publisher channels",
+    );
   if (!thread) {
     if (viewer !== publisher)
       throw new Error("Open a post by the channel publisher to reply");
@@ -90,6 +102,10 @@ export function validatePublisherMessage(
     !root ||
     ![9, 40002].includes(root.kind) ||
     threadReference(root) ||
+    root.tags.some(
+      ([key, value, , marker]) =>
+        key === "e" && marker === "root" && /^[0-9a-f]{64}$/i.test(value ?? ""),
+    ) ||
     !root.tags.some(([key, value]) => key === "h" && value === channel.id) ||
     messageAuthor(root, authority) !== publisher
   )

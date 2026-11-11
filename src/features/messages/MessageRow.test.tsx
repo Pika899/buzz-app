@@ -53,6 +53,7 @@ import { createRelaySession, type RelaySession } from "../relay/session";
 import type { TypingEntry } from "../relay/typing";
 import { LinkLabel } from "../../bundled/links/InlineLink";
 import { attestedOwner } from "../agents/owner-attestation";
+import { PLAIN_TEXT_LIMIT } from "../notifications/content";
 
 // Real verification, observed so tests can wait for its verdict.
 vi.mock("../agents/owner-attestation", async (original) => {
@@ -3372,8 +3373,8 @@ it("identifies the author on each activity summary in a message group", () => {
   }
 });
 
-it.each([280, 281])(
-  "caps activity previews at 280 characters (%s input)",
+it.each([PLAIN_TEXT_LIMIT, PLAIN_TEXT_LIMIT + 1])(
+  "caps activity previews at the plain-text limit (%s input)",
   (length) => {
     const content = "🙂".repeat(length);
     try {
@@ -3387,7 +3388,10 @@ it.each([280, 281])(
           retry={undefined}
         />,
       );
-      const preview = length === 280 ? content : `${"🙂".repeat(279)}…`;
+      const preview =
+        length === PLAIN_TEXT_LIMIT
+          ? content
+          : `${"🙂".repeat(PLAIN_TEXT_LIMIT - 1)}…`;
       const trigger = screen.getByRole("button", {
         name: `author: ${preview}`,
       });
@@ -3443,7 +3447,7 @@ it("shows a message for agents as one line from its author to whom it addresses"
       />,
     );
     const line = screen.getByRole("button", {
-      name: "Morgarita to Rivet: **run** the suite…",
+      name: "Morgarita to Rivet: run the suite…",
     });
     expect(line).toHaveAttribute("aria-expanded", "false");
     expect(line.parentElement?.querySelector("time")).toBeNull();

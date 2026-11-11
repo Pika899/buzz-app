@@ -59,7 +59,7 @@ fn should_batch(claims: &[SignatureClaim]) -> bool {
         return false;
     }
     // Native libsecp is faster for distinct authors. Only batch when merging
-    // repeated-author terms removes most public-key multiplications. See bench.
+    // repeated-author terms removes most public-key multiplications.
     let mut authors = BTreeSet::new();
     for claim in claims {
         authors.insert(claim.pubkey.as_str());

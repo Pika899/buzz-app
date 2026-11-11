@@ -207,3 +207,54 @@ html[data-keyboard-navigation] .document pre code:focus-visible {
   color: var(--text-subtle);
   font-style: italic;
 }
+
+/* Document scale: a page's hierarchy, from the title role down. */
+.documentScale h1 {
+  font-size: var(--text-title);
+  line-height: var(--text-title--line-height);
+  letter-spacing: var(--text-title--letter-spacing);
+  font-weight: var(--text-title--font-weight);
+}
+.documentScale h2 {
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--text-heading--font-weight);
+}
+.documentScale h3 {
+  font-size: var(--text-body-lg);
+  line-height: var(--text-body-lg--line-height);
+  letter-spacing: var(--text-body-lg--letter-spacing);
+  font-weight: var(--type-weight-medium);
+}
+.documentScale :where(h4, h5, h6) {
+  font-weight: var(--type-weight-medium);
+}
+.documentScale :where(h5, h6) {
+  color: var(--text-subtle);
+}
+.documentScale :is(ul, ol) ul {
+  list-style: circle;
+}
+.documentScale :is(ul, ol) :is(ul, ol) ul {
+  list-style: square;
+}
+
+/* Compact scale: headings inside a dense list keep label roles. */
+.compact :where(h1, h2, h3, h4, h5, h6) {
+  margin-top: var(--space-2);
+  color: var(--text-standard);
+  font-size: var(--text-label-sm);
+  line-height: var(--text-label-sm--line-height);
+  letter-spacing: var(--text-label-sm--letter-spacing);
+  font-weight: var(--text-label-sm--font-weight);
+}
+.compact h1 {
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+  font-weight: var(--text-label--font-weight);
+}
+.compact :where(p, ul, ol, blockquote, pre, .codeFrame, table, hr) {
+  margin: var(--space-2) 0;
+}

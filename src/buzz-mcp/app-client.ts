@@ -3,6 +3,7 @@
 // memory is read back through the owner's own session, to whom it is
 // encrypted.
 import type { BuzzClient, Memories } from "./client";
+import { nativeToolClient } from "../features/agents/tool-operation";
 import { prepareAttachment } from "../features/messages/prepare-attachment";
 import type { AgentHandle, AgentHandoff } from "../features/agents/service";
 import type {
@@ -37,6 +38,8 @@ export function appClient(
     captureProtectionContext?(): Promise<{ value: unknown; release(): void }>;
     /** The runtime reviews each tool call itself before Buzz dispatches it. */
     nativeToolGate?: boolean;
+    /** Set only by the native runtime for an active tool request. */
+    nativeCall?: () => void;
   }>,
 ): BuzzClient {
   const check = () => {
@@ -52,7 +55,7 @@ export function appClient(
   const handoff = agent.handoff;
   const plugins = agent.plugins;
   const { settings, soloWorkspaces } = agent;
-  return {
+  const client: BuzzClient = {
     ...(options.callSignal ? { signal: options.callSignal } : {}),
     ...(agent.protection
       ? {
@@ -335,6 +338,17 @@ export function appClient(
         }
       : {}),
   };
+  if (options.nativeCall && options.callSignal) {
+    nativeToolClient(client, {
+      signal: options.callSignal,
+      check: () => {
+        check();
+        options.nativeCall?.();
+        agent.attention.enabled();
+      },
+    });
+  }
+  return client;
 }
 
 /** Reads a file with the plugin's declared `read` process (`base64 -i`),

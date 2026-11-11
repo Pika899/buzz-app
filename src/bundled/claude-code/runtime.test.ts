@@ -3312,92 +3312,117 @@ it("drops a mention stopped while queued behind an Attention refresh", async () 
   }
 });
 
-it("revokes a native Claude operation proof when its turn ends during a read", async () => {
-  const f = setup([], { hold: true });
-  const provider = createToolOperation("example/proposal", () => ({
-    viewer: "a".repeat(64),
-    community: "https://relay.example.test",
-    check: () => {},
-    release: () => {},
-  }));
-  let authority: AgentToolAuthority | undefined;
-  let enter!: () => void;
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve;
-  });
-  let release!: () => void;
-  const reading = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const saved = vi.fn();
-  f.added.push({
-    name: "consumer_propose",
-    description: "Propose a question.",
-    inputSchema: { type: "object" },
-    operation: provider.operation,
-    async call(_client, _context, args, proof) {
-      if (!proof) throw new Error("Expected operation proof");
-      authority = provider.resolve(proof, args);
-      authority.check();
-      expect(authority.context.channel).toBe(channel);
-      enter();
-      await reading;
-      authority.check();
-      saved();
-      return "accepted";
-    },
-  });
-  try {
-    await f.deliver({
-      type: "mention",
-      event: message("1", "@Claude propose", {
-        tags: [
-          ["h", channel],
-          ["p", self],
-        ],
-      }),
+it.each(["host", "self", "background"] as const)(
+  "revokes a native Claude operation proof when its %s turn ends during a read",
+  async (turn) => {
+    const f = setup([], { hold: true });
+    const provider = createToolOperation("example/proposal", () => ({
+      viewer: "a".repeat(64),
+      community: "https://relay.example.test",
+      check: () => {},
+      release: () => {},
+    }));
+    let authority: AgentToolAuthority | undefined;
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
     });
-    await vi.waitFor(() =>
-      expect(f.claudes().some((process) => process.prompts.length)).toBe(true),
-    );
-    const process = f.claudes().find((process) => process.prompts.length);
-    if (!process) throw new Error("Expected active Claude");
-    const call = mcp(process, 200, "tools/call", {
+    let release!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const saved = vi.fn();
+    f.added.push({
       name: "consumer_propose",
-      arguments: { question: "Question" },
+      description: "Propose a question.",
+      inputSchema: { type: "object" },
+      operation: provider.operation,
+      async call(_client, _context, args, proof) {
+        if (!proof) throw new Error("Expected operation proof");
+        authority = provider.resolve(proof, args);
+        authority.check();
+        expect(authority.context.channel).toBe(channel);
+        enter();
+        await reading;
+        authority.check();
+        saved();
+        return "accepted";
+      },
     });
-    await entered;
-    process.finish();
-    await vi.waitFor(() =>
-      expect(() => authority?.check()).toThrow("Claude turn has ended"),
-    );
-    await f.deliver({
-      type: "mention",
-      event: message("2", "@Claude continue", {
-        tags: [
-          ["h", channel],
-          ["p", self],
-          ["e", message("1", "").id, "", "reply"],
-        ],
-      }),
-    });
-    await vi.waitFor(() => expect(process.prompts).toHaveLength(2));
-    expect(() => authority?.check()).toThrow("Claude turn has ended");
-    release();
-    await call;
-    await vi.waitFor(() =>
-      expect(
-        process.received.some(
-          (message) =>
-            message.type === "control_response" &&
-            (message.response as { request_id?: string }).request_id ===
-              "mcp-200",
+    try {
+      await f.deliver({
+        type: "mention",
+        event: message("1", "@Claude propose", {
+          tags: [
+            ["h", channel],
+            ["p", self],
+          ],
+        }),
+      });
+      await vi.waitFor(() =>
+        expect(f.claudes().some((process) => process.prompts.length)).toBe(
+          true,
         ),
-      ).toBe(true),
-    );
-    expect(saved).not.toHaveBeenCalled();
-  } finally {
-    release();
-    f.runtime.dispose();
-  }
-});
+      );
+      const process = f.claudes().find((process) => process.prompts.length);
+      if (!process) throw new Error("Expected active Claude");
+      if (turn !== "host") {
+        process.finish();
+        if (turn === "background")
+          process.emit({
+            type: "system",
+            subtype: "background_tasks_changed",
+            tasks: [{ id: "task-1" }],
+          });
+        process.emit({
+          type: "system",
+          subtype: "session_state_changed",
+          state: "working",
+        });
+      }
+      const call = mcp(process, 200, "tools/call", {
+        name: "consumer_propose",
+        arguments: { question: "Question" },
+      });
+      await entered;
+      if (turn === "host") process.finish();
+      else
+        process.emit({
+          type: "system",
+          subtype: "session_state_changed",
+          state: "idle",
+        });
+      await vi.waitFor(() =>
+        expect(() => authority?.check()).toThrow("Claude turn has ended"),
+      );
+      await f.deliver({
+        type: "mention",
+        event: message("2", "@Claude continue", {
+          tags: [
+            ["h", channel],
+            ["p", self],
+            ["e", message("1", "").id, "", "reply"],
+          ],
+        }),
+      });
+      await vi.waitFor(() => expect(process.prompts).toHaveLength(2));
+      expect(() => authority?.check()).toThrow("Claude turn has ended");
+      release();
+      await call;
+      await vi.waitFor(() =>
+        expect(
+          process.received.some(
+            (message) =>
+              message.type === "control_response" &&
+              (message.response as { request_id?: string }).request_id ===
+                "mcp-200",
+          ),
+        ).toBe(true),
+      );
+      expect(saved).not.toHaveBeenCalled();
+    } finally {
+      release();
+      f.runtime.dispose();
+    }
+  },
+);

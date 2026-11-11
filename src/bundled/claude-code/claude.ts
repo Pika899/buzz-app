@@ -792,6 +792,7 @@ export class ClaudeProcess {
       const active = this.active;
       const starts = !this.working && !this.busy && message.state !== "idle";
       this.working = message.state !== "idle";
+      if (!this.working) this.callEpoch++;
       // A turn of its own, such as a background task's, is new work.
       if (starts) this.renew();
       if (!this.working && this.pending) this.done();
@@ -873,7 +874,10 @@ export class ClaudeProcess {
         typeof message.result === "string" && message.result
           ? message.result
           : `Claude stopped (${String(message.subtype)})`;
-    if (!this.reportsState && this.pending) this.done();
+    if (!this.reportsState) {
+      this.callEpoch++;
+      if (this.pending) this.done();
+    }
   }
   private done() {
     const error = this.lastError;

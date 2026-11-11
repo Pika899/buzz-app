@@ -194,3 +194,20 @@ it("keeps a qualified span literal when its key is unsigned, lacks the name or t
   const content = `@Mic (${twin})`;
   literal(content, { attachmentSeams: [content.indexOf("(") + 3] });
 });
+it("binds a qualified span whose name differs in case to the signed key it names", () => {
+  const twin = "d".repeat(64);
+  const twins = new Map([
+    [mic, { name: "Mic" }],
+    [twin, { name: "Mic" }],
+  ]);
+  const content = `@MIC (${mic}) and @mic (${twin}), not @MIC (${"e".repeat(64)})`;
+  const result = profileMentionParts(
+    { ...row, content, mentions: [mic, twin] },
+    twins,
+  );
+  expect(result.filter((part) => part.target)).toEqual([
+    { text: `@MIC (${mic})`, target: profileTarget(mic) },
+    { text: `@mic (${twin})`, target: profileTarget(twin) },
+  ]);
+  expect(result.map((part) => part.text).join("")).toBe(content);
+});

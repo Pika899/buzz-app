@@ -1143,6 +1143,11 @@ confirmation. **Delete team** asks first; it doesn't delete the team's agents.
   A saved plugin sort can briefly wait for its plugin at startup, within the
   sidebar's 1.5-second loading budget. If unavailable, it falls back to A–Z
   without forgetting the saved choice.
+- In **Settings → Plugins → Manage plugins → Add**, copy a plugin listing’s
+  **Ref** into **Branch or tag**. Leave it blank to scan the repository’s
+  default branch. If Git reports an import size or repository entry limit,
+  try a branch or tag with fewer files or without oversized files. If the
+  limit persists, ask the publisher for a smaller repository or plugin files.
 - On desktop, plugins can support update checks and set them on or off by default.
   Use **Check for updates automatically** in the plugin's actions menu to change
   this choice. Buzz saves your choice across updates and restarts. Plugins without

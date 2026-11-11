@@ -47,6 +47,18 @@ const sourceLabel = (repository: string, path: string) =>
 const trimSlash = (value: string) => value.replace(/\/+$/, "");
 const requester = ({ id, name }: PluginInstallRequest["origin"]) =>
   name === id ? id : `${name} (${id})`;
+const gitReferenceDescription =
+  "Copy a plugin listing’s Ref into this field. Leave blank to scan the repository’s default branch.";
+const gitSizeRefusals = new Set([
+  "Git output exceeds the import size limit",
+  "Repository exceeds the 256 MiB import limit",
+  "Repository exceeds 20,000 files; use a smaller repository",
+  "Repository exceeds the import entry limit",
+  "File exceeds its size limit",
+]);
+const gitSizeRecoveryHint =
+  "Try a branch or tag with fewer files or without the oversized file. " +
+  "If the limit persists, ask the publisher for a smaller repository or plugin files.";
 
 function importLocation(
   preview: Pick<ImportPreview, "source" | "commit">,
@@ -1251,6 +1263,9 @@ export function PluginImport({
             {error}
           </p>
         )}
+        {error && !bound && !linkConstrained && gitSizeRefusals.has(error) && (
+          <p className="m-0 text-caption text-muted">{gitSizeRecoveryHint}</p>
+        )}
         {showUnchanged && candidate && (
           <PluginAccessReview
             manifest={candidate.manifest}
@@ -1337,7 +1352,14 @@ export function PluginImport({
                         onChange={(event) => setRepository(event.target.value)}
                       />
                     </Field>
-                    <Field label="Branch or tag (optional)">
+                    <Field
+                      label="Branch or tag (optional)"
+                      description={
+                        !bound && !linkConstrained
+                          ? gitReferenceDescription
+                          : undefined
+                      }
+                    >
                       <Input
                         value={reference}
                         disabled={blocked}

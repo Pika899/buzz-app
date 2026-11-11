@@ -23,6 +23,9 @@ import { cloneElement, StrictMode } from "react";
 
 afterEach(cleanup);
 
+const gitReferenceDescription =
+  "Copy a plugin listing’s Ref into this field. Leave blank to scan the repository’s default branch.";
+
 function startReview(updates: ReturnType<typeof createPluginUpdates>) {
   return updates.startNextReview(() => () => {});
 }
@@ -48,6 +51,12 @@ it("opens both sources inside Add without a duplicate safety warning, and restor
   expect(
     within(dialog).getByLabelText("Git or GitHub repository"),
   ).toBeVisible();
+  expect(
+    within(dialog).getByRole("textbox", {
+      name: "Branch or tag (optional)",
+      description: gitReferenceDescription,
+    }),
+  ).toHaveValue("");
   expect(within(dialog).queryByText(/plugins aren’t sandboxed/)).toBeNull();
   expect(
     within(dialog).getByRole("button", { name: "Browse plugin folder" }),
@@ -58,6 +67,140 @@ it("opens both sources inside Add without a duplicate safety warning, and restor
   await user.click(add);
   await user.click(document.querySelector(".buzz-dialog-backdrop") as Element);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+const gitSizeRefusals = [
+  "Git output exceeds the import size limit",
+  "Repository exceeds the 256 MiB import limit",
+  "Repository exceeds 20,000 files; use a smaller repository",
+  "Repository exceeds the import entry limit",
+  "File exceeds its size limit",
+];
+const gitSizeRecoveryHint =
+  "Try a branch or tag with fewer files or without the oversized file. " +
+  "If the limit persists, ask the publisher for a smaller repository or plugin files.";
+
+it.each([
+  ...gitSizeRefusals.map((error) => ({
+    error,
+    reference: "",
+    showRecovery: true,
+  })),
+  {
+    error: "Git output exceeds the import size limit",
+    reference: "release/stable",
+    showRecovery: true,
+  },
+  { error: "SSH authentication failed", reference: "", showRecovery: false },
+  {
+    error: "Could not resolve host: example.org",
+    reference: "",
+    showRecovery: false,
+  },
+])(
+  "keeps Git error text unchanged and adds recovery only for size refusals: $error",
+  async ({ error, reference: referenceValue, showRecovery }) => {
+    const user = userEvent.setup();
+    const git = vi.fn(async () => {
+      throw error;
+    });
+    const installImport = vi.fn();
+    const manager = {
+      imports: { git, discard: vi.fn(async () => {}) },
+      installImport,
+    } as unknown as PluginManager;
+    render(
+      <PluginImport
+        plugins={manager}
+        catalog={{ profile: "test", location: "test", plugins: [] }}
+        busy={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const dialog = screen.getByRole("dialog", { name: "Add a plugin" });
+    const repository = within(dialog).getByLabelText(
+      "Git or GitHub repository",
+    );
+    const reference = within(dialog).getByLabelText("Branch or tag (optional)");
+    expect(repository).toHaveValue("");
+    expect(reference).toHaveValue("");
+    expect(git).not.toHaveBeenCalled();
+    expect(installImport).not.toHaveBeenCalled();
+
+    await user.type(repository, "https://example.org/plugins");
+    if (referenceValue) await user.type(reference, referenceValue);
+    await user.click(
+      within(dialog).getByRole("button", { name: "Find plugins" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(error);
+    expect(git).toHaveBeenCalledExactlyOnceWith(
+      "https://example.org/plugins",
+      referenceValue,
+    );
+    expect(installImport).not.toHaveBeenCalled();
+    if (showRecovery) {
+      expect(screen.getByText(gitSizeRecoveryHint)).toBeVisible();
+    } else {
+      expect(screen.queryByText(gitSizeRecoveryHint)).toBeNull();
+    }
+  },
+);
+
+it("does not suggest changing a bound or pinned link source after a size refusal", async () => {
+  const error = "Git output exceeds the import size limit";
+  const user = userEvent.setup();
+  const bound = requestedHarness(requestedPreview(pinned));
+  bound.git.mockRejectedValue(error);
+  render(bound.element);
+  const boundDialog = await screen.findByRole("dialog", {
+    name: "Add a plugin",
+  });
+  expect(within(boundDialog).queryByText(gitReferenceDescription)).toBeNull();
+  await user.click(
+    within(boundDialog).getByRole("button", { name: "Find plugins" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(error);
+  expect(screen.queryByText(gitSizeRecoveryHint)).toBeNull();
+  expect(bound.git).toHaveBeenCalledExactlyOnceWith(
+    "https://example.com/plugins.git",
+    "v1",
+    undefined,
+    pinned,
+  );
+  expect(bound.installImport).not.toHaveBeenCalled();
+
+  cleanup();
+  const git = vi.fn(async () => {
+    throw error;
+  });
+  const installImport = vi.fn();
+  const manager = {
+    imports: { git, discard: vi.fn(async () => {}) },
+    installImport,
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      initialGit={{
+        repository: "https://example.org/plugins",
+        reference: "release/stable",
+        commit: pinned,
+      }}
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  expect(screen.queryByText(gitReferenceDescription)).toBeNull();
+  expect(await screen.findByRole("alert")).toHaveTextContent(error);
+  expect(screen.queryByText(gitSizeRecoveryHint)).toBeNull();
+  expect(git).toHaveBeenCalledExactlyOnceWith(
+    "https://example.org/plugins",
+    "release/stable",
+    undefined,
+    pinned,
+  );
+  expect(installImport).not.toHaveBeenCalled();
 });
 
 it("blocks dismissal and duplicate acquisition while loading, then discards the preview on close", async () => {
@@ -882,6 +1025,10 @@ it("Back restores source fields and focus after acquisition fails", async () => 
   await user.click(find);
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Repository unavailable",
+  );
+  expect(git).toHaveBeenCalledExactlyOnceWith(
+    "https://github.com/example/plugin",
+    "stable",
   );
   expect(screen.queryByRole("form", { name: "Add from Git" })).toBeNull();
   const back = screen.getByRole("button", { name: "Back" });

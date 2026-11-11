@@ -597,6 +597,88 @@ test("Settings controls scale together and keep enlarged labels reachable", asyn
   }
 });
 
+test("manual Git release-ref guidance stays readable across scale and themes", async ({
+  page,
+  app,
+}, info) => {
+  await nativeImports(page);
+  await openPlugins(page, app.origin);
+  await page.setViewportSize({ width: 320, height: 900 });
+  await selectSettingsSection(page, "Appearance");
+  await chooseColorMode(page, "Light");
+  await selectSettingsSection(page, "Manage plugins");
+  await button(page, "Add").click();
+
+  const dialog = page.getByRole("dialog", { name: "Add a plugin" });
+  const guidance = dialog.getByText(
+    "Copy a plugin listing’s Ref into this field. Leave blank to scan the repository’s default branch.",
+  );
+  const reference = dialog.getByRole("textbox", {
+    name: "Branch or tag (optional)",
+    description:
+      "Copy a plugin listing’s Ref into this field. Leave blank to scan the repository’s default branch.",
+  });
+  await expect(guidance).toBeVisible();
+  await reference.scrollIntoViewIfNeeded();
+  await expect(reference).toBeInViewport({ ratio: 1 });
+  await expect(reference).toHaveValue("");
+  await reference.click();
+  await page.keyboard.type("release/stable");
+  await expect(reference).toHaveValue("release/stable");
+  const bounds = await guidance.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  if (info.project.name === "webkit") {
+    await page.screenshot({
+      path: info.outputPath("manual-git-ref-light-narrow.png"),
+    });
+  }
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await selectSettingsSection(page, "Appearance");
+  for (let i = 0; i < 10; i++)
+    await button(page, "Increase interface size").click();
+  await expect(page.getByRole("status", { name: "Interface size" })).toHaveText(
+    "200%",
+  );
+  await chooseColorMode(page, "Dark");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await selectSettingsSection(page, "Manage plugins");
+  await button(page, "Add").click();
+  const enlargedDialog = page.getByRole("dialog", { name: "Add a plugin" });
+  const enlargedGuidance = enlargedDialog.getByText(
+    "Copy a plugin listing’s Ref into this field. Leave blank to scan the repository’s default branch.",
+  );
+  const enlargedReference = enlargedDialog.getByRole("textbox", {
+    name: "Branch or tag (optional)",
+    description:
+      "Copy a plugin listing’s Ref into this field. Leave blank to scan the repository’s default branch.",
+  });
+  await expect(enlargedGuidance).toBeVisible();
+  await enlargedReference.scrollIntoViewIfNeeded();
+  await expect(enlargedReference).toBeInViewport({ ratio: 1 });
+  await button(page, "Browse plugin folder").focus();
+  await page.keyboard.press("Tab");
+  await expect(
+    enlargedDialog.getByRole("textbox", { name: "Git or GitHub repository" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(enlargedReference).toBeFocused();
+  await enlargedReference.fill("stable");
+  await expect(enlargedReference).toHaveValue("stable");
+  if (info.project.name === "webkit") {
+    await page.screenshot({
+      path: info.outputPath("manual-git-ref-dark-wide.png"),
+    });
+  }
+  expect(
+    await page.evaluate(() =>
+      window.importCalls.some((call) => call.command === "plugin_import_git"),
+    ),
+  ).toBe(false);
+});
+
 test("folder/Git preview selects the exact subfolder and preserves enabled state through updates", async ({
   page,
   app,

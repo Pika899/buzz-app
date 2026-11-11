@@ -12,6 +12,7 @@ import type {
   AgentVoicePipe,
   AgentType,
   AgentHandle,
+  SoloWorkspaces,
   AgentCreationInput,
   AgentReadout,
   AgentUpdateInput,
@@ -518,6 +519,7 @@ export type RunnerHost = {
   handoff(agent: Agent, handoff: AgentHandoff): void;
   /** The owner's channel templates as the agent's handle offers them. */
   templates(agent: Agent): ReturnType<AgentHandle["templates"]>;
+  soloWorkspaces?(agent: Agent): SoloWorkspaces | undefined;
   /** The owner's thread tabs as the agent's handle offers them. */
   tabs(agent: Agent): ReturnType<AgentHandle["tabs"]>;
   /** Buzz settings on this device, where there are any. */
@@ -538,6 +540,7 @@ export type RunnerHost = {
         | "release"
         | "publish"
         | "query"
+        | "effectiveEdit"
         | "searchProfiles"
         | "upload"
         | "media"
@@ -2474,15 +2477,25 @@ export class AgentRunners {
   }
 
   private showWork(runner: Runner, job: Job) {
-    if (job.work || job.trigger.type !== "mention") return;
+    if (
+      job.work ||
+      (job.trigger.type !== "mention" && job.trigger.type !== "plugin")
+    )
+      return;
+    const trigger = job.trigger;
     const agent = this.host.agent(runner.key);
     const scope = agent && this.host.scope(agent);
-    const event = job.trigger.event;
+    const event =
+      trigger.type === "mention" ? trigger.event : wakeAnchor(trigger);
     const channelId =
       job.channelId ?? event.tags.find(([key]) => key === "h")?.[1];
     if (!scope || !channelId) return;
     const threadRootId = threadReference(event)?.rootId;
     const channel = this.host.channel(agent, event);
+    const thread =
+      threadRootId &&
+      (trigger.type === "mention" ||
+        (channel?.channelType !== "solo" && channel?.channelType !== "dm"));
     const soloChat =
       channel?.channelType === "solo" &&
       !channel.cached &&
@@ -2495,16 +2508,19 @@ export class AgentRunners {
         agent: runner.member.pubkey,
         channelId,
         messageId: event.id,
+        ...(trigger.type === "plugin" ? { syntheticMessage: true } : {}),
         threadRootId: threadRootId ?? event.id,
-        ...(threadRootId ? { thread: true } : {}),
+        ...(thread ? { thread: true } : {}),
         ...(soloChat ? { soloChat: true } : {}),
         ...(soloChat && conversationName ? { conversationName } : {}),
       },
-      // Retry queues the same mention again. It was seen when first heard,
-      // so it is not marked again; its run saves it as working as any does.
+      // A resumed mention must not reuse its resume marker on retry.
       () =>
         void this.enqueue(runner, {
-          trigger: { type: "mention", event },
+          trigger:
+            trigger.type === "mention"
+              ? { type: "mention", event: trigger.event }
+              : trigger,
           ...(job.channelId ? { channelId: job.channelId } : {}),
         }),
     );
@@ -2838,6 +2854,8 @@ export class AgentRunners {
     const lifetime = runner.controller.signal;
     const protection = this.host.protection?.(agent);
     const settings = run ? this.host.settings?.() : undefined;
+    const workspaces = run ? this.host.soloWorkspaces?.(agent) : undefined;
+    const creations = new Map<string, (event: RelayEvent) => void>();
     const handle = guarded(
       {
         protection: protection && {
@@ -2865,6 +2883,13 @@ export class AgentRunners {
               lifetime,
               check,
             );
+            if (workspaces && event.kind === 9007) {
+              const id = published.tags.find(([key]) => key === "h")?.[1];
+              if (id) {
+                creations.get(id)?.(published);
+                creations.delete(id);
+              }
+            }
             if (ownReply) {
               const channel = this.host.channel(agent, published);
               if (
@@ -2888,6 +2913,10 @@ export class AgentRunners {
         query: async (filters: readonly object[]) => {
           lifetime.throwIfAborted();
           return this.require().query(agent, filters);
+        },
+        effectiveEdit: async (id: string, channel: string) => {
+          lifetime.throwIfAborted();
+          return this.require().effectiveEdit(agent, id, channel);
         },
         searchProfiles: async (query: string, limit: number) => {
           lifetime.throwIfAborted();
@@ -2941,6 +2970,44 @@ export class AgentRunners {
           handoff: (handoff: AgentHandoff) => {
             lifetime.throwIfAborted();
             this.host.handoff(agent, handoff);
+          },
+        }),
+        ...(workspaces && {
+          soloWorkspaces: {
+            list: (signal?: AbortSignal) =>
+              workspaces.list(
+                AbortSignal.any([lifetime, ...(signal ? [signal] : [])]),
+              ),
+            prepare: async (
+              workspace: string,
+              members: readonly string[],
+              channelId: string,
+              signal?: AbortSignal,
+            ) => {
+              const active = AbortSignal.any([
+                lifetime,
+                ...(signal ? [signal] : []),
+              ]);
+              const file = await workspaces.prepare(workspace, members, active);
+              // Each overlapping call owns one exact future create, consumed once.
+              let created: RelayEvent | undefined;
+              if (creations.has(channelId))
+                throw new Error("Chat creation already prepared");
+              creations.set(channelId, (event) => {
+                created = event;
+              });
+              let attempted = false;
+              return async (id: string) => {
+                active.throwIfAborted();
+                if (attempted)
+                  throw new Error("Solo placement was already attempted");
+                const event = created;
+                if (id !== channelId || !event)
+                  throw new Error("No new chat from this run to file");
+                attempted = true;
+                return file(event);
+              };
+            },
           },
         }),
         templates: () => this.host.templates(agent),

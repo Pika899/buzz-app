@@ -32,6 +32,7 @@ import {
   useSyncExternalStore,
   Fragment,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { Virtualizer, type VirtualizerHandle } from "virtua";
 import { MessageRow, type MessageLinkOrigin } from "./MessageRow";
@@ -180,6 +181,8 @@ export type ChannelTimelineProps = {
   /** A parent keyed by connection generation can preserve its timeline on cache promotion. */
   continuityKey?: string | undefined;
   window: ChannelWindow;
+  /** Local presentation at the known history start, outside message semantics. */
+  intro?: ReactNode;
   launchPending?: boolean | undefined;
   /** Solo chats page history on scroll; retain an explicit button for errors. */
   historyControl?: "button" | "scroll";
@@ -235,6 +238,7 @@ function Timeline({
   queries,
   window,
   launchPending,
+  intro,
   historyControl = "button",
   onOpenLink,
   canOpenLink,
@@ -249,6 +253,8 @@ function Timeline({
   startsThreads = true,
 }: ChannelTimelineProps) {
   useMessageSelectionCopy();
+  const shownIntro =
+    !window.hasMore && !window.historyLimited ? intro : undefined;
   const [initialPosition] = useState(() =>
     transient
       ? null
@@ -470,21 +476,25 @@ function Timeline({
       // history it may know only the loaded rows, and its oldest unread one
       // can sit in the window below any read row while older ones are unread.
       // This is the only gate that holds this list's own reading: every
-      // earlier one has passed, so the repair alone is awaited.
+      // earlier one has passed, so the repair alone is awaited. A repair that
+      // ended without sampling (failed, overflowed, abandoned) settles the
+      // visit with no line, so reading never waits for a later retry.
       if (!unreadSnapshot.sampled)
-        return { ready: false, awaitingRepair: true };
+        return unreadSnapshot.sampling
+          ? { ready: false, awaitingRepair: true }
+          : { ready: true };
       const oldest = unreadSnapshot.oldestUnreadId;
       if (!oldest || !baseline.messageIds.has(oldest)) return { ready: true };
     }
     if (!chronologicalRows.length) return { ready: noUnreadEvidence };
     // A repair batch that fills its limit can stop inside the window, leaving
-    // the first loaded row the oldest unread message the store knows. Requiring
-    // a read entry row first covers only ordinary rows: catch-up's activity:
-    // mark reads all of them up to a timestamp. It never reads mentions,
-    // broadcasts, broadcast replies or messages marked unread; only their own
-    // msg: or thread: marks do, so a short sample can still hide an unread one
-    // above the window. A row read by its own mark says nothing about the rows
-    // above it either.
+    // the first loaded row the oldest unread message the store knows. So the
+    // line needs an entry row above it that a channel-wide read reaches, which
+    // reads every older ordinary row; one read only by its own msg: or thread:
+    // mark says nothing about them. That still leaves mentions, broadcasts,
+    // broadcast replies and messages marked unread, which catch-up's activity:
+    // mark never reads, so a short sample can hide an unread one of those
+    // above the window.
     let afterRead = messageVisit.entryHistoryComplete;
     for (const { row, attention } of entryAttention) {
       if (attention.status === "unknown" || attention.pending)
@@ -503,7 +513,7 @@ function Timeline({
       // Ineligible means no attention category, not that an incoming row is read.
       if (attention.forced || attention.unread)
         return afterRead ? { ready: true, messageId: row.id } : { ready: true };
-      afterRead = true;
+      if (attention.prefixRead) afterRead = true;
     }
     return { ready: true };
   })();
@@ -1896,7 +1906,9 @@ function Timeline({
         ref={edge}
         className={styles.edge}
         data-history-space={reserveHistorySpace || undefined}
+        data-intro={!!shownIntro || undefined}
       >
+        {shownIntro}
         {edgeError && <span role="alert">{edgeError}</span>}
         {window.historyLimited ? (
           <span>History window limit reached</span>
@@ -2139,6 +2151,7 @@ function Timeline({
         <div className={styles.timelineEnd} aria-hidden="true" />
       </div>
       {!rows.length &&
+        !shownIntro &&
         !window.hasMore &&
         window.status === "ready" &&
         !window.error &&

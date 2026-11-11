@@ -16,11 +16,16 @@ import {
   createPluginInstallRequests,
   type PluginInstallRequest,
 } from "../plugins/installer";
+import { createPluginUpdates } from "../plugins/updates";
 import { PluginImport } from "./PluginImport";
 import userEvent from "@testing-library/user-event";
 import { cloneElement, StrictMode } from "react";
 
 afterEach(cleanup);
+
+function startReview(updates: ReturnType<typeof createPluginUpdates>) {
+  return updates.startNextReview(() => () => {});
+}
 
 it("opens both sources inside Add without a duplicate safety warning, and restores focus on close", async () => {
   const user = userEvent.setup();
@@ -219,7 +224,7 @@ it("shows exact declared access and changes before an enabled update", async () 
   };
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => preview),
       folder: vi.fn(async () => preview),
       git: vi.fn(),
@@ -371,7 +376,7 @@ it.each([
     };
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => preview),
         folder: vi.fn(async () => preview),
         discard: vi.fn(async () => {}),
@@ -575,7 +580,7 @@ it.each([
     };
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => preview),
         folder: vi.fn(async () => preview),
         discard: vi.fn(async () => {}),
@@ -639,7 +644,7 @@ it("signs in only to repositories the community authorizes", async () => {
   const git = vi.fn(async () => preview);
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(),
       folder: vi.fn(),
       git,
@@ -717,7 +722,7 @@ it("replaces Add with an error view and returns to the retained preview for retr
     );
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => preview),
       folder: vi.fn(async () => preview),
       discard: vi.fn(async () => {}),
@@ -897,7 +902,7 @@ it.each([true, false])(
   async (enabled) => {
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => ({
           token: "new",
           source: "/plugin",
@@ -996,7 +1001,7 @@ it("limits pane updates to the selected plugin without modifying the source prev
   };
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => preview),
       folder: vi.fn(async () => preview),
       discard: vi.fn(async () => {}),
@@ -1027,6 +1032,261 @@ it("limits pane updates to the selected plugin without modifying the source prev
   expect(preview.candidates).toHaveLength(2);
 });
 
+it("rejects publisher drift and refuses an update after its queue confirmation expires", async () => {
+  const source = {
+    repository: "https://example.com/plugins.git",
+    reference: "main",
+    path: "target",
+  };
+  const manifest = {
+    id: "example.target",
+    name: "Target",
+    apiVersion: 1 as const,
+    updates: { defaultEnabled: true },
+  };
+  const installed: PluginInfo = {
+    manifest,
+    source: "external",
+    enabled: false,
+    revision: "one",
+    previous: null,
+    reloadable: true,
+    error: null,
+    updateSource: source,
+  };
+  const candidate = {
+    path: "target",
+    manifest,
+    revision: "two",
+    publisher: "checked-publisher",
+  };
+  const preview: ImportPreview = {
+    token: "queued-preview",
+    source: source.repository,
+    commit: null,
+    warnings: [],
+    candidates: [candidate],
+  };
+  const installImport = vi.fn(async () => true);
+  let validationError: string | undefined;
+  const queuedUpdate = {
+    validate: vi.fn(() => validationError),
+    confirmed: vi.fn(() => undefined),
+    settled: vi.fn(),
+    ended: vi.fn(),
+  };
+  const catalog = { profile: "test", location: "test", plugins: [installed] };
+  const manager = {
+    imports: {
+      git: vi.fn(async () => preview),
+      checkGit: vi.fn(async () => preview),
+      discard: vi.fn(async () => {}),
+    },
+    snapshot: () => ({
+      configuration: {
+        status: "ready" as const,
+        externalPluginsPaused: false,
+        catalog,
+      },
+      error: null,
+    }),
+    installImport,
+    change: vi.fn(),
+  } as unknown as PluginManager;
+  let view = render(
+    <PluginImport
+      updateId={manifest.id}
+      updateAction={{
+        source,
+        candidateRevision: "two",
+        candidatePublisher: "checked-publisher",
+      }}
+      reviewRequested
+      queuedUpdate={queuedUpdate}
+      authorizeGit={async () => null}
+      plugins={manager}
+      catalog={catalog}
+      busy={false}
+    />,
+  );
+
+  const dialog = await screen.findByRole("dialog", { name: "Update Target" });
+  const update = await within(dialog).findByRole("button", {
+    name: "Update",
+  });
+  candidate.publisher = "new-publisher";
+  fireEvent.click(update);
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "The update publisher changed after it was checked. Check for updates again before reviewing it.",
+  );
+  expect(queuedUpdate.validate).not.toHaveBeenCalled();
+  expect(queuedUpdate.confirmed).not.toHaveBeenCalled();
+  expect(installImport).not.toHaveBeenCalled();
+  expect(queuedUpdate.settled).not.toHaveBeenCalled();
+  expect(queuedUpdate.ended).not.toHaveBeenCalled();
+  expect(dialog).toBeVisible();
+  view.unmount();
+  await waitFor(() =>
+    expect(queuedUpdate.ended).toHaveBeenCalledWith(
+      "The update publisher changed after it was checked. Check for updates again before reviewing it.",
+    ),
+  );
+  expect(queuedUpdate.ended).toHaveBeenCalledTimes(1);
+  queuedUpdate.ended.mockClear();
+  validationError = "The update candidate changed after it was checked.";
+  view = render(
+    <PluginImport
+      updateId={manifest.id}
+      updateAction={{ source, candidateRevision: "two" }}
+      reviewRequested
+      queuedUpdate={queuedUpdate}
+      authorizeGit={async () => null}
+      plugins={manager}
+      catalog={catalog}
+      busy={false}
+    />,
+  );
+  const staleDialog = await screen.findByRole("dialog", {
+    name: "Update Target",
+  });
+  fireEvent.click(
+    await within(staleDialog).findByRole("button", { name: "Update" }),
+  );
+  expect(await within(staleDialog).findByRole("alert")).toHaveTextContent(
+    validationError,
+  );
+  expect(queuedUpdate.ended).not.toHaveBeenCalled();
+  expect(staleDialog).toBeVisible();
+  expect(queuedUpdate.confirmed).not.toHaveBeenCalled();
+  expect(queuedUpdate.settled).not.toHaveBeenCalled();
+  expect(installImport).not.toHaveBeenCalled();
+  view.unmount();
+  await waitFor(() =>
+    expect(queuedUpdate.ended).toHaveBeenCalledWith(validationError),
+  );
+  expect(queuedUpdate.ended).toHaveBeenCalledTimes(1);
+  queuedUpdate.ended.mockClear();
+  validationError = undefined;
+  view = render(
+    <PluginImport
+      updateId={manifest.id}
+      updateAction={{ source, candidateRevision: "two" }}
+      reviewRequested
+      queuedUpdate={queuedUpdate}
+      authorizeGit={async () => null}
+      plugins={manager}
+      catalog={catalog}
+      busy={false}
+    />,
+  );
+  const expiredDialog = await screen.findByRole("dialog", {
+    name: "Update Target",
+  });
+  fireEvent.click(
+    await within(expiredDialog).findByRole("button", {
+      name: "Update",
+    }),
+  );
+  expect(await within(expiredDialog).findByRole("alert")).toHaveTextContent(
+    "This update review is no longer active",
+  );
+  expect(queuedUpdate.confirmed).toHaveBeenCalledOnce();
+  expect(installImport).not.toHaveBeenCalled();
+});
+
+it("releases the serialized queue when a confirmed review unmounts and fails", async () => {
+  const source = {
+    repository: "https://example.com/plugins.git",
+    reference: "main",
+    path: ".",
+  };
+  const manifest = {
+    id: "example.target",
+    name: "Target",
+    apiVersion: 1 as const,
+    updates: { defaultEnabled: true },
+  };
+  const installed: PluginInfo = {
+    manifest,
+    source: "external",
+    enabled: false,
+    revision: "one",
+    previous: null,
+    reloadable: true,
+    error: null,
+    updateSource: source,
+  };
+  const preview: ImportPreview = {
+    token: "queued-preview",
+    source: source.repository,
+    commit: null,
+    warnings: [],
+    candidates: [{ path: ".", manifest, revision: "two" }],
+  };
+  const catalog: Catalog = {
+    profile: "test",
+    location: "test",
+    plugins: [installed],
+  };
+  let finish!: (success: boolean) => void;
+  const installImport = vi.fn(
+    () => new Promise<boolean>((resolve) => (finish = resolve)),
+  );
+  const configuration = {
+    status: "ready" as const,
+    externalPluginsPaused: false,
+    catalog,
+  };
+  const manager = {
+    imports: {
+      checkGit: vi.fn(async () => preview),
+      git: vi.fn(async () => preview),
+      discard: vi.fn(async () => {}),
+    },
+    snapshot: () => ({ configuration, error: null }),
+    subscribe: () => () => {},
+    installImport,
+    change: vi.fn(),
+  } as unknown as PluginManager;
+  const updates = createPluginUpdates(manager, async () => null);
+  const token = (await updates.capability.refresh()).candidates[0]?.token;
+  if (!token) throw new Error("Expected a retained update token");
+  const queue = updates.capability.queueUpdates([token]);
+  if (!queue) throw new Error("Expected an accepted fresh queue");
+  expect(startReview(updates)?.token).toBe(token);
+  const queuedUpdate = {
+    validate: () => (updates.isCurrentToken(token) ? undefined : "stale"),
+    confirmed: () => updates.beginOperation(queue.id, token),
+    settled: (outcome: "installed" | "updated" | "cancelled" | "unavailable") =>
+      updates.finishReview(queue.id, token, outcome),
+    ended: (error?: string) => updates.endReview(queue.id, token, error),
+  };
+  const view = render(
+    <PluginImport
+      plugins={manager}
+      catalog={catalog}
+      busy={false}
+      updateId={manifest.id}
+      updateAction={{ source, candidateRevision: "two" }}
+      reviewRequested
+      queuedUpdate={queuedUpdate}
+    />,
+  );
+  const review = await screen.findByRole("dialog", { name: "Update Target" });
+  fireEvent.click(within(review).getByRole("button", { name: "Update" }));
+  await waitFor(() => expect(installImport).toHaveBeenCalledOnce());
+  view.unmount();
+  await act(async () => Promise.resolve());
+  await act(async () => finish(false));
+
+  expect(updates.capability.getQueue(queue.id)).toMatchObject({
+    status: "failed",
+    items: [{ status: "failed" }],
+  });
+  expect(updates.getActiveReview()).toBeUndefined();
+  updates.dispose();
+});
+
 it("opens installed details instead of adding another source", async () => {
   const manifest = {
     id: "example.duplicate",
@@ -1047,7 +1307,7 @@ it("opens installed details instead of adding another source", async () => {
     installImport: vi.fn(async () => true),
     change: vi.fn(),
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         token: "duplicate",
         source: "/example",
@@ -1112,7 +1372,7 @@ it("keeps install review stable while the saved catalog arrives before enabling"
   );
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         token: "pending",
         source: "/example",
@@ -1335,7 +1595,7 @@ it.each([
     const user = userEvent.setup();
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => rememberedPreview),
         folder: vi.fn(async () => rememberedPreview),
         git: vi.fn(async () => rememberedPreview),
@@ -1410,7 +1670,7 @@ it("shows unchanged declarations in a separate dialog view and returns without r
   };
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         ...rememberedPreview,
         candidates: [
@@ -1518,7 +1778,7 @@ it.each([true, false])(
     const discard = vi.fn(async () => {});
     const manager = {
       imports: {
-        checkFolder: vi.fn(async () => "updated"),
+        checkFolder: vi.fn(async () => ({ revision: "updated" })),
         previewFolder: vi.fn(async () => ({
           ...rememberedPreview,
           candidates: [
@@ -1583,7 +1843,7 @@ it("rejects a replacement source without the installed plugin ID", async () => {
   const user = userEvent.setup();
   const manager = {
     imports: {
-      checkFolder: vi.fn(async () => "updated"),
+      checkFolder: vi.fn(async () => ({ revision: "updated" })),
       previewFolder: vi.fn(async () => ({
         ...rememberedPreview,
         candidates: [
@@ -1659,7 +1919,7 @@ function savedFolderProps(imports: unknown) {
 
 it("checks revisions without acquiring a preview and prepares fresh bytes only on Update", async () => {
   const imports = {
-    checkFolder: vi.fn(async () => "new"),
+    checkFolder: vi.fn(async () => ({ revision: "new" })),
     previewFolder: vi.fn(async () => rememberedPreview),
     discard: vi.fn(async () => {}),
   };
@@ -1684,13 +1944,13 @@ it("checks revisions without acquiring a preview and prepares fresh bytes only o
 
 it("retries folder diagnostics and ignores late read-only checks after unmount", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  let finish!: (revision: string) => void;
+  let finish!: (release: { revision: string }) => void;
   const checkFolder = vi
     .fn()
     .mockRejectedValueOnce(new Error("dist: plugin.js is missing"))
     .mockImplementation(
       () =>
-        new Promise<string>((resolve) => {
+        new Promise<{ revision: string }>((resolve) => {
           finish = resolve;
         }),
     );
@@ -1711,7 +1971,7 @@ it("retries folder diagnostics and ignores late read-only checks after unmount",
     await act(async () => vi.advanceTimersByTime(10_000));
     expect(checkFolder).toHaveBeenCalledTimes(2);
     view.unmount();
-    await act(async () => finish("new"));
+    await act(async () => finish({ revision: "new" }));
     expect(changed).toHaveBeenLastCalledWith(false);
     expect(imports.previewFolder).not.toHaveBeenCalled();
     expect(imports.discard).not.toHaveBeenCalled();
@@ -1723,10 +1983,10 @@ it("retries folder diagnostics and ignores late read-only checks after unmount",
 
 it("keeps unchanged checks quiet until the shared one-second loading delay", async () => {
   vi.useFakeTimers();
-  let finish!: (revision: string) => void;
+  let finish!: (release: { revision: string }) => void;
   const checkFolder = vi.fn(
     () =>
-      new Promise<string>((resolve) => {
+      new Promise<{ revision: string }>((resolve) => {
         finish = resolve;
       }),
   );
@@ -1739,12 +1999,12 @@ it("keeps unchanged checks quiet until the shared one-second loading delay", asy
     expect(screen.getByRole("status")).toHaveTextContent(
       "Checking for updates…",
     );
-    await act(async () => finish("old"));
+    await act(async () => finish({ revision: "old" }));
     expect(screen.getByText("Up to date")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
     await act(async () => vi.advanceTimersByTime(4_000));
     expect(checkFolder).toHaveBeenCalledTimes(2);
-    await act(async () => finish("old"));
+    await act(async () => finish({ revision: "old" }));
   } finally {
     view.unmount();
     vi.useRealTimers();
@@ -1788,7 +2048,7 @@ it("retains known Git updates on reopen and reacquires before review", async () 
 
 it("refreshes a stale known update from the newly acquired package", async () => {
   const imports = {
-    checkFolder: vi.fn(async () => "earlier-check"),
+    checkFolder: vi.fn(async () => ({ revision: "earlier-check" })),
     previewFolder: vi.fn(async () => ({
       ...rememberedPreview,
       candidates: [{ ...rememberedPreview.candidates[0], revision: "old" }],
@@ -1932,7 +2192,7 @@ it.each(["folder", "git"])(
         candidates: [rememberedPreview.candidates[0]],
       });
     const props = savedFolderProps({
-      checkFolder: vi.fn(async () => "new"),
+      checkFolder: vi.fn(async () => ({ revision: "new" })),
       previewFolder: acquire,
       git: acquire,
       discard: vi.fn(async () => {}),

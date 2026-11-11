@@ -265,7 +265,21 @@ for (const action of ["Remove from this device", "Leave community"]) {
 }
 
 test.describe("community administration permissions", () => {
-  test("shows Membership to a verified owner", async ({ page, app }) => {
+  test("shows Membership to a verified owner", async ({
+    page,
+    app,
+    browserName,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: {
+          writeText: async (text) => {
+            window.copiedInvite = text;
+          },
+        },
+        configurable: true,
+      });
+    });
     let rosterGate;
     let rosterStarted = () => {};
     await page.route("**/api/relay/primary/query", async (route) => {
@@ -295,24 +309,67 @@ test.describe("community administration permissions", () => {
     await expect(
       page.getByRole("heading", { name: "Membership", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Invite members" }).click();
-    const dialog = page.getByRole("dialog", { name: "Add or invite people" });
+    const dialog = settingsDialog(page);
+    await page.getByRole("tab", { name: "Invite", exact: true }).click();
     await expect(
-      dialog.getByRole("heading", { name: "Add directly" }),
-    ).toBeVisible();
+      page.getByRole("tab", { name: "Invite", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await page.goBack();
     await expect(
-      dialog.getByRole("heading", { name: "Invite with a link" }),
+      page.getByRole("tab", { name: "Members", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await page.goForward();
+    await expect(
+      page.getByRole("tab", { name: "Invite", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await expect(
+      dialog.getByRole("textbox", { name: "Community invite link" }),
     ).toBeVisible();
+    const inviteLink = dialog.getByRole("textbox", {
+      name: "Community invite link",
+    });
+    await expect(inviteLink).toHaveValue(
+      "https://primary.example/invite/fixture",
+    );
+    const copy = dialog.getByRole("button", { name: /^(Copy link|Copied)$/ });
+    await copy.click();
+    await expect(copy).toHaveText("Copied");
+    await expect
+      .poll(() => page.evaluate(() => window.copiedInvite))
+      .toBe("https://primary.example/invite/fixture");
+    await expect(
+      dialog.getByText("Invite link copied.", { exact: true }),
+    ).toHaveCount(0);
+    await expect(copy).not.toBeFocused();
+    await expect(copy).toHaveCSS("outline-style", "none");
+    await expect(inviteLink.locator("..")).toHaveCSS(
+      "border-color",
+      "rgba(0, 0, 0, 0)",
+    );
+    // Keyboard copying still focuses the action and keeps its visible ring.
+    await inviteLink.focus();
+    await page.keyboard.press(
+      `${browserName === "webkit" && process.platform === "darwin" ? "Alt+" : ""}Tab`,
+    );
+    await expect(copy).toBeFocused();
+    await expect(copy).toHaveCSS("outline-style", "solid");
+    await copy.press("Enter");
+    await expect(copy).toHaveText("Copied");
+    await expect(copy).toBeFocused();
+    await expect(
+      page.getByRole("tab", { name: "Add directly", exact: true }),
+    ).toHaveCount(0);
     await expect(
       dialog.getByRole("textbox", { name: "Public identity" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await page.getByRole("tab", { name: "Members", exact: true }).click();
     await expect(
-      dialog.getByRole("combobox", { name: /Search people/ }),
+      dialog.getByRole("button", { name: "Refresh", exact: true }),
     ).toHaveCount(0);
 
     // Keep browser history/reload, real roster verification, and host wiring real.
     // A held response proves this route cannot fall through to Profile or failure.
-    await page.keyboard.press("Escape");
     let releaseRoster;
     rosterGate = new Promise((resolve) => {
       releaseRoster = resolve;

@@ -221,7 +221,14 @@ cards use the existing relay protocol; no server changes are part of this slice.
 This is a client-only implementation. It uses the existing private ephemeral
 channel creation event (9007, TTL 3600), parent announcement (48100), authenticated
 `/huddle/{room}/audio` endpoint and v2 Opus wire format. The relay owns participant
-join/leave and last-person teardown. Before an announcement is attempted, a failed
+join/leave and disconnected-call teardown. On explicit desktop hangup, the client
+ends and archives a creator-owned room when fresh relay membership identifies the
+viewer as its sole human and the native audio roster has exactly one admission
+for that viewer. Known additional devices, other human members, unknown peers,
+and unavailable membership evidence preserve the room. This is a snapshot check,
+not an atomic relay admission fence; concurrent joins still depend on relay cleanup.
+It retains room membership for transcript View. Non-creators rely on relay ending
+because only the creator or relay may publish the ended event. Before an announcement is attempted, a failed
 creation is rolled back by archiving its temporary room. After the announcement
 may be visible, the client never archives the room on a failed connection: others
 may already have joined, so existing relay socket/TTL cleanup owns it.

@@ -14,7 +14,8 @@ export const TURN_INSTRUCTIONS_LIMIT = 16 * 1024;
 /** Room kept for the note when some instructions are left out. */
 const OMITTED_NOTE_LIMIT = 512;
 const SEPARATOR = "\n\n";
-let lastOmitted = "";
+/** The sets of plugins left out that were already logged, across agents. */
+const warned = new Set<string>();
 
 export const utf8Bytes = (text: string) =>
   new TextEncoder().encode(text).length;
@@ -36,10 +37,7 @@ export function pluginInstructions(entries: readonly TurnInstructions[] = []) {
     text: section(plugin, text),
   }));
   const all = sections.map(({ text }) => text).join(SEPARATOR);
-  if (utf8Bytes(all) <= TURN_INSTRUCTIONS_LIMIT) {
-    lastOmitted = "";
-    return all || undefined;
-  }
+  if (utf8Bytes(all) <= TURN_INSTRUCTIONS_LIMIT) return all || undefined;
   let room = TURN_INSTRUCTIONS_LIMIT - OMITTED_NOTE_LIMIT;
   const kept: string[] = [];
   const omitted = new Set<string>();
@@ -51,13 +49,15 @@ export function pluginInstructions(entries: readonly TurnInstructions[] = []) {
       room -= size;
     }
   }
-  // Once for each new set left out, not on every turn while it lasts.
+  // Once for each set left out, not on every turn while it lasts.
   const key = [...omitted].join(" ");
-  if (key !== lastOmitted)
+  if (!warned.has(key)) {
+    if (warned.size >= 64) warned.clear();
+    warned.add(key);
     console.warn("Plugin instructions over the turn limit were left out", [
       ...omitted,
     ]);
-  lastOmitted = key;
+  }
   return [...kept, omittedNote([...omitted])].join(SEPARATOR);
 }
 
@@ -80,7 +80,7 @@ function omittedNote(plugins: readonly string[]) {
   const end = `: this turn's plugin instructions would be over ${TURN_INSTRUCTIONS_LIMIT / 1024} KB.)`;
   // Room for "(Buzz left out some instructions from ", the end, the separator
   // and " and 1000000 more".
-  let room = OMITTED_NOTE_LIMIT - 39 - utf8Bytes(end) - SEPARATOR.length - 17;
+  let room = OMITTED_NOTE_LIMIT - 38 - utf8Bytes(end) - SEPARATOR.length - 17;
   const named: string[] = [];
   for (const plugin of plugins) {
     const size = plugin.length + (named.length ? 2 : 0);

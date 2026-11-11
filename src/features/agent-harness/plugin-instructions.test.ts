@@ -50,15 +50,22 @@ it("keeps the sections that fit, in order, and names the plugins left out", () =
     "Plugin instructions over the turn limit were left out",
     ["acme.d"],
   );
-  // The same plugins left out on the next turn log nothing new.
+  // The same plugins left out again log nothing new, even after a turn that
+  // fit or one that left out others, as agents' turns interleave.
   warn.mockClear();
+  pluginInstructions([{ plugin: "acme.a", text: full }]);
+  pluginInstructions([
+    { plugin: "acme.x", text: "x".repeat(TURN_INSTRUCTIONS_LIMIT) },
+  ]);
   pluginInstructions([
     { plugin: "acme.a", text: full },
     { plugin: "acme.b", text: full },
     { plugin: "acme.c", text: full },
     { plugin: "acme.d", text: full },
   ]);
-  expect(warn).not.toHaveBeenCalled();
+  expect(warn.mock.calls).toEqual([
+    ["Plugin instructions over the turn limit were left out", ["acme.x"]],
+  ]);
 });
 
 it("counts the tags of many short sections and the escapes in their text", () => {

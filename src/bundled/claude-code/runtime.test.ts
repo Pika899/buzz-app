@@ -3371,6 +3371,18 @@ it("revokes a native Claude operation proof when its turn ends during a read", a
     await vi.waitFor(() =>
       expect(() => authority?.check()).toThrow("Claude turn has ended"),
     );
+    await f.deliver({
+      type: "mention",
+      event: message("2", "@Claude continue", {
+        tags: [
+          ["h", channel],
+          ["p", self],
+          ["e", message("1", "").id, "", "reply"],
+        ],
+      }),
+    });
+    await vi.waitFor(() => expect(process.prompts).toHaveLength(2));
+    expect(() => authority?.check()).toThrow("Claude turn has ended");
     release();
     await call;
     await vi.waitFor(() =>

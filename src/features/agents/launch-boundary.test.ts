@@ -287,6 +287,7 @@ async function setup<Config>(
   };
   return {
     service,
+    plugin,
     session: session.session,
     requests: counted.requests,
     transport: counted.state,
@@ -502,8 +503,20 @@ it("starts a Codex thread and a turn from the synced copies; offline, only its c
     codex.sent.filter((wire) => wire.method === method);
   const outcome = (id: string) =>
     f.activity.reader.work().find((work) => work.messageId === id);
+  f.plugin.agents.registerSessionRouter({
+    id: "tasks",
+    ready: async () => {},
+    matches: () => true,
+    prepare: async (input) => ({
+      association: { task: input.source.root ?? "channel" },
+    }),
+  });
   const first = f.mention();
   await vi.waitFor(() => expect(outcome(first.id)?.state).toBe("done"));
+  expect(outcome(first.id)?.session).toMatchObject({
+    router: "buzz/tasks",
+    association: { task: first.id },
+  });
   const [thread] = starts("thread/start");
   expect(thread?.params).toMatchObject({
     model: "synced-model",

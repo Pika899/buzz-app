@@ -3393,7 +3393,7 @@ it("takes plugin instructions of at most 4 KB of UTF-8 text", async () => {
   // "é" is two bytes; the surrounding spaces are trimmed before measuring.
   for (const text of ["x".repeat(4097), "é".repeat(2049)])
     expect(() => agents.addInstructions({ id: "rules", text })).toThrow(
-      /over 4 KB/,
+      /over 4096 bytes/,
     );
   expect(() =>
     agents.addInstructions({ id: "rules", text: ` ${"é".repeat(2048)} ` }),

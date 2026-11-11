@@ -2910,19 +2910,23 @@ export class AgentsService extends Service implements Agents {
     });
   }
   addInstructions(instructions: AgentInstructions) {
+    // What is checked is what is kept, whatever the object does later.
+    const { id, text, when } = instructions;
     if (
-      !/^[a-z0-9][a-z0-9._-]*$/.test(instructions.id ?? "") ||
-      typeof instructions.text !== "string" ||
-      !instructions.text.trim() ||
-      (instructions.when !== undefined &&
-        typeof instructions.when !== "function")
+      !/^[a-z0-9][a-z0-9._-]*$/.test(id ?? "") ||
+      typeof text !== "string" ||
+      !text.trim() ||
+      (when !== undefined && typeof when !== "function")
     )
       throw new Error("Agent instructions need an id and text");
-    if (utf8Bytes(instructions.text.trim()) > INSTRUCTIONS_TEXT_LIMIT)
+    if (utf8Bytes(text.trim()) > INSTRUCTIONS_TEXT_LIMIT)
       throw new Error(
-        `Agent instructions are over ${INSTRUCTIONS_TEXT_LIMIT / 1024} KB`,
+        `Agent instructions are over ${INSTRUCTIONS_TEXT_LIMIT} bytes`,
       );
-    this.addedInstructions.register(this.ctx, instructions);
+    this.addedInstructions.register(
+      this.ctx,
+      when ? { id, text, when } : { id, text },
+    );
   }
   /** The instructions active plugins give this agent's turns now, ordered by
    * plugin and id so the order plugins start in does not change a prompt. */

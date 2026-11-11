@@ -1037,34 +1037,6 @@ describe("GooseRuntime", () => {
     expect(memoryOpen).not.toHaveBeenCalled();
   });
 
-  it("keeps its core memory through a failed read, and clears it once there is none", async () => {
-    const root = message("1", "@Gander hi");
-    const reply = (id: string): RelayEvent =>
-      message(id, "@Gander again", {
-        tags: [
-          ["h", channel],
-          ["e", root.id, "", "reply"],
-          ["p", self],
-        ],
-      });
-    const { core, deliver, fake, goose } = setup({ core: "Old rules." });
-    const prompt = () => [...(goose()?.prompts.values() ?? [])].join();
-    await deliver(root);
-    await flush(100);
-    expect(prompt()).toContain("Old rules.");
-    core.mockResolvedValue(undefined);
-    await deliver(reply("2"));
-    await flush(100);
-    expect(prompt()).toContain("Old rules.");
-    core.mockResolvedValue(null);
-    await deliver(reply("3"));
-    await flush(100);
-    expect(prompt()).not.toContain("Old rules.");
-    // Each prompt reached the one session in place.
-    expect(fake.geese.flatMap((process) => process.opened)).toHaveLength(1);
-    expect(goose()?.turns).toHaveLength(3);
-  });
-
   it("leaves a Solo chat's session for goose to name, and offers that name", async () => {
     const solo = setup({ hold: true, solo: new Set([channel]) });
     const named = vi.fn();

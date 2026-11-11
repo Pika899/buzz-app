@@ -997,3 +997,34 @@ it("tries the first download again when a mention finds no copy", async () => {
   expect(disk.state.fetched).toHaveLength(2);
   expect(disk.state.used).toEqual(["2.1.300"]);
 });
+
+it("holds a delivery while it updates a copy too old for Buzz", async () => {
+  const disk = releases("2.1.300", { current: "2.1.177" });
+  const { spawn, waiting, release } = held(disk, "install");
+  const setup = new ClaudeSetup(spawn, disk.request);
+  const update = setup.update(false);
+  await waiting;
+  let delivered = false;
+  const delivery = setup.installed(new AbortController().signal).then(() => {
+    delivered = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(delivered).toBe(false);
+  release();
+  await Promise.all([update, delivery]);
+  expect(setup.snapshot().status).toMatchObject({ version: "2.1.300" });
+});
+
+it("refuses a delivery when a copy too old for Buzz could not be updated", async () => {
+  const disk = releases("2.1.300", { current: "2.1.177" });
+  disk.state.offline = true;
+  const setup = new ClaudeSetup(disk.spawn, disk.request);
+  await setup.update(false);
+  expect(setup.snapshot().status).toEqual({
+    state: "outdated",
+    version: "2.1.177",
+  });
+  await expect(setup.installed(new AbortController().signal)).rejects.toThrow(
+    "Claude 2.1.177 is older than Buzz needs (2.1.267)",
+  );
+});

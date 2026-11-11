@@ -397,15 +397,17 @@ export class ClaudeSetup {
 
   /** Holds a delivery while Buzz looks for its copy and downloads a first
    * one, so a mention sent meanwhile is answered rather than lost to a
-   * missing copy. Once a copy is found, updating it holds nothing. */
+   * missing copy. A copy too old for Buzz waits for its update too, and
+   * refuses the delivery if it is still too old. Once a usable copy is found,
+   * updating it holds nothing. */
   async installed(signal: AbortSignal) {
-    const found = () => {
-      const status = this.state.status;
-      return status !== undefined && status.state !== "missing";
+    const unusable = () => {
+      const state = this.state.status?.state;
+      return state === "missing" || state === "outdated";
     };
-    // After a first download failed, a mention tries it again.
-    if (!this.holding && this.state.status?.state === "missing")
-      void this.update(true);
+    const found = () => this.state.status !== undefined && !unusable();
+    // After a first download or an update failed, a mention tries it again.
+    if (!this.holding && unusable()) void this.update(true);
     for (let work = this.holding; work && !found(); work = this.holding) {
       const ended = work;
       await new Promise<void>((resolve, reject) => {
@@ -430,6 +432,11 @@ export class ClaudeSetup {
         if (signal.aborted) abort();
       });
     }
+    const status = this.state.status;
+    if (status?.state === "outdated")
+      throw new Error(
+        `Claude ${status.version} is older than Buzz needs (${MIN_VERSION}), and updating it failed. Update it in Settings.`,
+      );
   }
   /** Makes `work` what deliveries wait on, until it ends. */
   private hold(work: Promise<void>) {

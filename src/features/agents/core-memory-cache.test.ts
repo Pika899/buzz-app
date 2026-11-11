@@ -20,6 +20,10 @@ function setup() {
   return {
     cache,
     memoryListing,
+    /** Loses the connection, with nothing to read through. */
+    disconnect() {
+      reads = undefined;
+    },
     /** Replaces the connection, which may read as someone else. */
     reconnect(read = memoryListing, scope = "wss://one.test") {
       reads = {
@@ -201,4 +205,28 @@ it("forgets a left community's copy, keeps it across a disconnect, and lets no h
   f.reconnect(rejoin, "wss://one.test");
   await expect(f.cache.core(agent)).resolves.toBe("fresh");
   expect(rejoin).toHaveBeenCalledOnce();
+});
+
+it("keeps core memory with no connection, but not once its community is left", async () => {
+  const f = setup();
+  await f.cache.core(agent);
+  f.disconnect();
+  await expect(f.cache.core(agent)).resolves.toBe("one");
+  forgetCoreMemory("wss://one.test");
+  await expect(f.cache.core(agent)).resolves.toBeUndefined();
+  // Rejoining, a first read that fails or misses it does not restore it.
+  f.reconnect(vi.fn(async () => listing(undefined, true)));
+  await expect(f.cache.core(agent)).resolves.toBeUndefined();
+  f.reconnect(vi.fn(async () => Promise.reject(new Error("offline"))));
+  await expect(f.cache.core(agent)).resolves.toBeUndefined();
+});
+
+it("clears core memory once a read finds none, even with no connection", async () => {
+  const f = setup();
+  await f.cache.core(agent);
+  const none = vi.fn(async () => listing());
+  f.reconnect(none);
+  await f.cache.refresh(agent);
+  f.disconnect();
+  await expect(f.cache.core(agent)).resolves.toBeNull();
 });

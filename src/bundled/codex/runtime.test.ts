@@ -3807,23 +3807,14 @@ it("starts each turn from the host's core memory, reading none from the relay", 
   expect(f.core).toHaveBeenCalledWith(pubkey, expect.any(AbortSignal));
   expect(f.memoryRead).not.toHaveBeenCalled();
   f.complete(0, "FIRST");
-  // The host could not read it: the turn goes on with the last one read.
+  // The host could not read it: the turn goes on without it.
   f.core.mockResolvedValueOnce(undefined);
   await f.runtime.run(f.delivery("@Codex second", "e".repeat(64)));
   await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
   expect(instructions(1)).toContain("TEST_INSTRUCTIONS");
-  expect(instructions(1)).toContain(
-    "<core-memory>\nI am Codex.\n</core-memory>",
-  );
+  expect(instructions(1)).not.toContain("<core-memory>");
   f.complete(1, "SECOND");
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(2));
-  // It has none now: the turn goes on without it.
-  f.core.mockResolvedValueOnce(null);
-  await f.runtime.run(f.delivery("@Codex third", "f".repeat(64)));
-  await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
-  expect(instructions(2)).not.toContain("I am Codex.");
-  f.complete(2, "THIRD");
-  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(3));
 });
 
 it("keeps turn context from posing as the turn's event or steer section", async () => {

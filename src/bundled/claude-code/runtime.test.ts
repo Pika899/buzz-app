@@ -1247,45 +1247,6 @@ it("resumes an idle session on the agent's new core memory", async () => {
   expect(systemPromptOf(second)).not.toContain("Old rules.");
 });
 
-for (const [name, read, kept] of [
-  [
-    "keeps an idle session and its core memory when a read fails",
-    undefined,
-    true,
-  ],
-  ["resumes an idle session without core memory once it is gone", null, false],
-] as const)
-  it(name, async () => {
-    const root = message("2", "@Claude hi", {
-      tags: [
-        ["h", channel],
-        ["p", self],
-      ],
-    });
-    const reply = message("3", "@Claude again", {
-      tags: [
-        ["h", channel],
-        ["e", root.id, "", "reply"],
-        ["p", self],
-      ],
-    });
-    const { deliver, claudes, core } = setup([root, reply]);
-    const prompted = () =>
-      claudes().filter((process) => process.prompts.length);
-    core.mockResolvedValue("Old rules.");
-    await deliver({ type: "mention", event: root });
-    await flush(10);
-    const [first] = prompted();
-    core.mockResolvedValue(read);
-    await deliver({ type: "mention", event: reply });
-    await flush(10);
-    expect(first?.killed).toBe(!kept);
-    const last = prompted().at(-1);
-    expect(last?.prompts.at(-1)).toContain("again");
-    if (kept) expect(prompted()).toHaveLength(1);
-    else expect(systemPromptOf(last)).not.toContain("Old rules.");
-  });
-
 it("starts each session from the host's core memory, reading only recent notes from the relay", async () => {
   const { deliver, claudes, core, memoryRead } = setup();
   const mention = (id: string) =>
@@ -1316,11 +1277,12 @@ it("starts each session from the host's core memory, reading only recent notes f
     expect(pubkey).toBe(self);
     expect(slug).toMatch(/^mem\/notes\/\d{4}-\d{2}-\d{2}$/);
   }
-  // The host could not read it: the session starts on the last one read.
+  // The host could not read it: the session starts without it.
   core.mockResolvedValueOnce(undefined);
   await mention("2");
   await flush(10);
-  expect(asked("2")).toContain("<core-memory>\nI am Claude.\n</core-memory>");
+  expect(asked("2")).toContain("## Agent Memory");
+  expect(asked("2")).not.toContain("<core-memory>");
 });
 
 it("starts a session without recent notes the relay is slow to give", async () => {

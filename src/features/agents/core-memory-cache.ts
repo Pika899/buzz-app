@@ -33,6 +33,9 @@ export class CoreMemoryCache {
   private readonly writers = new Map<string, number>();
   private writer = 0;
   private readonly latest = new Map<string, string | null>();
+  /** Each agent's community as it last read it, whose copy answers while
+   * it is disconnected. Leaving that community forgets the copy itself. */
+  private readonly scopes = new Map<string, string>();
 
   constructor(
     /** The reads of each agent's community, while it can be read. */
@@ -60,9 +63,13 @@ export class CoreMemoryCache {
     const timeout = AbortSignal.timeout(FIRST_READ_MS);
     try {
       const reads = this.reads(pubkey);
-      if (!reads) throw new Error("Buzz is not connected");
-      const cached = this.latest.get(this.key(reads.scope, pubkey));
+      const scope = reads?.scope ?? this.scopes.get(pubkey);
+      const cached =
+        scope === undefined
+          ? undefined
+          : this.latest.get(this.key(scope, pubkey));
       if (cached !== undefined) return cached;
+      if (!reads) throw new Error("Buzz is not connected");
       return await this.read(
         reads,
         pubkey,
@@ -92,6 +99,7 @@ export class CoreMemoryCache {
     if (!reads) return;
     this.memoryReads.forget(reads.connection, pubkey);
     if (slug !== "core" || body === null) return;
+    this.scopes.set(pubkey, reads.scope);
     const key = this.key(reads.scope, pubkey);
     this.claim(key);
     this.latest.set(key, body);
@@ -101,6 +109,7 @@ export class CoreMemoryCache {
    * a later read or write started since. Undefined when the connection was
    * replaced or the agent left it: a new one may read as someone else. */
   private async read(reads: AgentReads, pubkey: string, signal: AbortSignal) {
+    this.scopes.set(pubkey, reads.scope);
     const key = this.key(reads.scope, pubkey);
     const writer = this.claim(key);
     const memory = coreOf(

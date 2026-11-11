@@ -147,21 +147,3 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal) {
       .finally(() => signal.removeEventListener("abort", abort));
   });
 }
-
-/** `core` that answers a failed read (`undefined`) with the last text it read
- * for that agent, so a disconnect doesn't drop memory from its prompt. A read
- * that finds none (`null`) still clears it. */
-export function keepingLastCore(
-  core: (
-    agent: string,
-    signal?: AbortSignal,
-  ) => Promise<string | null | undefined>,
-) {
-  const last = new Map<string, string | null>();
-  return async (agent: string, ...signal: [AbortSignal?]) => {
-    const memory = await core(agent, ...signal);
-    if (memory === undefined) return last.get(agent);
-    last.set(agent, memory);
-    return memory;
-  };
-}

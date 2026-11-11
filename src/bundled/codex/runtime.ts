@@ -42,10 +42,7 @@ import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readProject } from "../../features/agent-harness/project";
 import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
-import {
-  keepingLastCore,
-  MemoryReads,
-} from "../../features/agent-harness/core-memory";
+import { MemoryReads } from "../../features/agent-harness/core-memory";
 import { SessionControls } from "../../features/agent-harness/session-control";
 import type {
   SessionPlace,
@@ -327,15 +324,12 @@ export class CodexRuntime {
   /** A failed turn's notice as the thread reads it, such as where to sign
    * Codex in again. */
   explain: (notice: string) => string = (notice) => notice;
-  /** Its last read `core` memory stands in for a failed read. */
-  private readonly core: Agents["core"];
-
   constructor(
     private readonly spawn: Spawn,
     /** What each agent's turns read of its community, while it can be read. */
     private readonly reads: (key: AgentKey) => AgentReads | undefined,
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
-    core: Agents["core"],
+    private readonly core: Agents["core"],
     private readonly storage: AgentStore = localStore(),
     private readonly resolveConfig: (
       raw: unknown,
@@ -362,9 +356,7 @@ export class CodexRuntime {
     private readonly protectionHost?: Pick<Host, "spawn" | "serveMcp">,
     private readonly handle: (pubkey: string) => AgentHandle | undefined = () =>
       undefined,
-  ) {
-    this.core = keepingLastCore(core);
-  }
+  ) {}
   private executionKey(agent: AgentKey, scope: string, conversation: string) {
     return `buzz.codex.sessions.execution.v1:${scope}:${agent}:${conversation}`;
   }

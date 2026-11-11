@@ -375,25 +375,6 @@ describe("harnessKit.systemPrompt", () => {
     expect(text).not.toContain("<buzz-tools-unavailable>");
   });
 
-  it("keeps core memory through a failed read, and clears it once there is none", async () => {
-    const options: { core?: string | null } = { core: "Remember the milk." };
-    const { kit, delivery } = setup(options);
-    const prompt = () =>
-      kit.systemPrompt(
-        delivery({ type: "mention", event: message("1", "x") }),
-        {
-          scope: "thread",
-          cwd: "~",
-          instructions: "",
-        },
-      );
-    expect(await prompt()).toContain("Remember the milk.");
-    delete options.core;
-    expect(await prompt()).toContain("Remember the milk.");
-    options.core = null;
-    expect(await prompt()).not.toContain("Remember the milk.");
-  });
-
   it("tells a session without tools that its final message is its reply", async () => {
     const { kit, delivery } = setup();
     const text = await kit.systemPrompt(

@@ -719,6 +719,9 @@ function setup(
     recovery: async () => undefined,
     recover: async () => {},
     acknowledge: async () => {},
+    retire: async () => {
+      throw new Error("Unexpected retirement");
+    },
     snapshot: () => [],
     subscribe: receipts.subscribe,
     supports: (kind) => channelCreation && [9, 9000, 9007].includes(kind),
@@ -1329,6 +1332,9 @@ it.each([true, false])(
         recovery: async () => undefined,
         recover: async () => {},
         acknowledge: async () => {},
+        retire: async () => {
+          throw new Error("Unexpected retirement");
+        },
         supports: () => true,
         send: vi.fn(),
         snapshot: () => items,

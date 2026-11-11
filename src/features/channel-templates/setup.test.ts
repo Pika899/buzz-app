@@ -69,6 +69,9 @@ function fixture() {
     recovery: async () => undefined,
     recover: async () => {},
     acknowledge: async () => {},
+    retire: async () => {
+      throw new Error("Unexpected retirement");
+    },
     supports: () => true,
     send: vi.fn((value) => {
       const event = signed(viewer, { ...value, created_at: clock++ });

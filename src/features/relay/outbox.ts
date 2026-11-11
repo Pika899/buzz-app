@@ -87,6 +87,9 @@ export interface Outbox {
   ): Promise<void>;
   retry(id: string, active?: () => boolean): void;
   dismiss(id: string): Promise<void>;
+  /** Retire an obsolete guarded receipt after its caller revokes admission.
+   * This removes saved intent; it does not cancel or undo delivery. */
+  retire(id: string, recovery: OutboxRecovery): Promise<"retired" | "pending">;
   /** Durable explicit dismissal, with delivery evidence at removal. */
   observeDismiss(listener: (item: OutgoingEvent) => void): () => void;
 }
@@ -100,6 +103,9 @@ export interface OutboxStorage {
   lock?<T>(id: string, run: () => Promise<T>): Promise<T>;
   /** Relinquish incremental write ownership after observing external removal. */
   forget?(id: string): void;
+  /** Atomically remove this receipt and prevent later saves from restoring it.
+   * Reject a present receipt with a different recovery identity or no guard. */
+  retire?(id: string, recovery: OutboxRecovery): Promise<void>;
   close?(): void;
   load(options?: {
     readOnly?: boolean;
@@ -1096,6 +1102,47 @@ export function createOutbox(
         .finally(() => dismissing.delete(id));
       dismissing.set(id, work);
       return work;
+    },
+    async retire(id: string, recovery: OutboxRecovery) {
+      const saved = recoveryValue(recovery);
+      if (!saved || !/^[a-f0-9]{64}$/.test(id))
+        throw new Error("Invalid outbox retirement");
+      await ready;
+      if (closed || storageError)
+        throw new Error(storageError ?? "Outbox is closed");
+      if (!storage.retire)
+        throw new Error("Outbox storage does not support retirement");
+      const item = find(id);
+      if (
+        item &&
+        (!item.guarded ||
+          item.recovery?.key !== saved.key ||
+          item.recovery.value !== saved.value)
+      )
+        throw new Error("Outbox retirement does not match the receipt");
+      if (
+        attempts.has(id) ||
+        dismissing.has(id) ||
+        admissionGates.get(id)?.() === true
+      )
+        return "pending";
+      // Retirement must not join a stalled save. Storage excludes the terminal
+      // ID from every later save, including work owned by another window.
+      const work = storage.retire(id, saved).then(() => {
+        deliveryWork.delete(id);
+        completed.delete(id);
+        restoredReceipts.delete(id);
+        admissionGates.delete(id);
+        snapshot = Object.freeze(snapshot.filter((row) => row.event.id !== id));
+        notify();
+      });
+      dismissing.set(id, work);
+      try {
+        await work;
+        return "retired";
+      } finally {
+        if (dismissing.get(id) === work) dismissing.delete(id);
+      }
     },
   });
   return {

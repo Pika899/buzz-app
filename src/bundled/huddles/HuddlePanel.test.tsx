@@ -61,6 +61,9 @@ it("releases unsent files on close while retaining the saved panel text draft", 
       recovery: async () => undefined,
       recover: async () => {},
       acknowledge: async () => {},
+      retire: async () => {
+        throw new Error("Unexpected retirement");
+      },
       retry: () => {},
       dismiss: async () => {},
     },

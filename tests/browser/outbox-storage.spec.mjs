@@ -1,5 +1,288 @@
 import { test, expect } from "./source-fixture.mjs";
 
+for (const initialSave of ["before-retirement", "after-retirement"])
+  test(`retirement excludes stale saves across windows and restart (${initialSave})`, async ({
+    page,
+    context,
+    sourceOrigin,
+  }) => {
+    await context.route(`${sourceOrigin}/outbox-retirement-test`, (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>Outbox retirement</title>",
+      }),
+    );
+    const peer = await context.newPage();
+    await Promise.all([
+      page.goto(`${sourceOrigin}/outbox-retirement-test`),
+      peer.goto(`${sourceOrigin}/outbox-retirement-test`),
+    ]);
+    const scope = `retirement-${crypto.randomUUID()}`;
+    const recovery = { key: "follow-up:example", value: "completed" };
+    const old = {
+      event: { id: "old" },
+      recovery,
+      guarded: true,
+      delivery: "unknown",
+    };
+    const other = { event: { id: "other" }, delivery: "sending" };
+    await peer.evaluate(
+      async ({ scope, old, initialSave }) => {
+        const { browserOutboxStorage } = await import(
+          "/src/features/relay/outbox-storage.ts"
+        );
+        window.retirementStore = browserOutboxStorage(scope);
+        await window.retirementStore.load();
+        if (initialSave === "before-retirement")
+          await window.retirementStore.save([old]);
+      },
+      { scope, old, initialSave },
+    );
+    try {
+      await page.evaluate(
+        async ({ scope, recovery }) => {
+          const { browserOutboxStorage } = await import(
+            "/src/features/relay/outbox-storage.ts"
+          );
+          const store = browserOutboxStorage(scope);
+          try {
+            await store.retire("old", recovery);
+          } finally {
+            store.close();
+          }
+        },
+        { scope, recovery },
+      );
+      await peer.evaluate(
+        async ({ old, other }) => {
+          await window.retirementStore.save([
+            { ...old, delivery: "failed" },
+            other,
+          ]);
+          // A later unrelated save captures the same obsolete local row.
+          await window.retirementStore.save([
+            old,
+            { ...other, delivery: "accepted" },
+          ]);
+          window.retirementStore.close();
+        },
+        { old, other },
+      );
+      await peer.reload();
+      const result = await peer.evaluate(
+        async ({ scope, old }) => {
+          const { browserOutboxStorage } = await import(
+            "/src/features/relay/outbox-storage.ts"
+          );
+          const store = browserOutboxStorage(scope);
+          const isolated = browserOutboxStorage(`${scope}-other`);
+          try {
+            const restored = await store.load();
+            await store.save([...restored, old]);
+            await isolated.save([old]);
+            const durable = await new Promise((resolve, reject) => {
+              const request = indexedDB.open("buzz-outbox-v2", 3);
+              request.onerror = () => reject(request.error);
+              request.onsuccess = () => {
+                const db = request.result;
+                const tx = db.transaction("events");
+                const rows = tx
+                  .objectStore("events")
+                  .index("scope")
+                  .getAll(IDBKeyRange.only(scope));
+                tx.oncomplete = () => {
+                  db.close();
+                  resolve(rows.result.map((row) => row.id));
+                };
+                tx.onabort = () => {
+                  db.close();
+                  reject(tx.error);
+                };
+              };
+            });
+            await store.retire("old", old.recovery);
+            return {
+              durable,
+              ids: (await store.load({ readOnly: true })).map(
+                (row) => row.event.id,
+              ),
+              isolated: (await isolated.load()).map((row) => row.event.id),
+            };
+          } finally {
+            store.close();
+            isolated.close();
+          }
+        },
+        { scope, old },
+      );
+      expect(result).toEqual({
+        durable: ["other"],
+        ids: ["other"],
+        isolated: ["old"],
+      });
+    } finally {
+      await peer.evaluate(
+        async ({ scope }) => {
+          window.retirementStore?.close();
+          const { purgeOutboxStorage } = await import(
+            "/src/features/relay/outbox-storage.ts"
+          );
+          await purgeOutboxStorage(scope);
+          await purgeOutboxStorage(`${scope}-other`);
+        },
+        { scope },
+      );
+    }
+  });
+
+test("retirement checks recovery identity and guard before durable removal", async ({
+  page,
+  context,
+  sourceOrigin,
+}) => {
+  await context.route(`${sourceOrigin}/outbox-retirement-test`, (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><title>Outbox retirement</title>",
+    }),
+  );
+  await page.goto(`${sourceOrigin}/outbox-retirement-test`);
+  const result = await page.evaluate(async () => {
+    const { browserOutboxStorage, purgeOutboxStorage } = await import(
+      "/src/features/relay/outbox-storage.ts"
+    );
+    const scope = `identity-${crypto.randomUUID()}`;
+    const store = browserOutboxStorage(scope);
+    const recovery = { key: "follow-up:example", value: "completed" };
+    const guarded = {
+      event: { id: "guarded" },
+      recovery,
+      guarded: true,
+      delivery: "unknown",
+    };
+    const unguarded = {
+      event: { id: "unguarded" },
+      recovery,
+      delivery: "unknown",
+    };
+    const failures = [];
+    try {
+      await store.save([guarded, unguarded]);
+      for (const [id, expected] of [
+        ["guarded", { ...recovery, value: "wrong" }],
+        ["unguarded", recovery],
+      ]) {
+        try {
+          await store.retire(id, expected);
+        } catch {
+          failures.push(id);
+        }
+      }
+      const before = (await store.load()).map((row) => row.event.id).sort();
+      await store.retire("guarded", recovery);
+      try {
+        await store.retire("guarded", { ...recovery, key: "wrong" });
+      } catch {
+        failures.push("marker");
+      }
+      await store.save([guarded, unguarded]);
+      const after = (await store.load()).map((row) => row.event.id);
+      store.close();
+      await purgeOutboxStorage(scope);
+      const fresh = browserOutboxStorage(scope);
+      try {
+        await fresh.save([guarded]);
+        return {
+          failures,
+          before,
+          after,
+          purged: (await fresh.load()).map((row) => row.event.id),
+        };
+      } finally {
+        fresh.close();
+      }
+    } finally {
+      store.close();
+      await purgeOutboxStorage(scope);
+    }
+  });
+  expect(result).toEqual({
+    failures: ["guarded", "unguarded", "marker"],
+    before: ["guarded", "unguarded"],
+    after: ["unguarded"],
+    purged: ["guarded"],
+  });
+});
+
+test("retirement preserves a version 2 journal and excludes legacy rows", async ({
+  page,
+  context,
+  sourceOrigin,
+}) => {
+  await context.route(`${sourceOrigin}/outbox-retirement-test`, (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><title>Outbox retirement</title>",
+    }),
+  );
+  await page.goto(`${sourceOrigin}/outbox-retirement-test`);
+  const result = await page.evaluate(async () => {
+    const scope = `migration-${crypto.randomUUID()}`;
+    const recovery = { key: "follow-up:example", value: "completed" };
+    const old = {
+      event: { id: "old" },
+      guarded: true,
+      recovery,
+      delivery: "unknown",
+    };
+    const other = { event: { id: "other" }, delivery: "failed" };
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("buzz-outbox-v2", 2);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("partitions");
+        request.result
+          .createObjectStore("events", { keyPath: ["scope", "id"] })
+          .createIndex("scope", "scope");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(["events", "partitions"], "readwrite");
+      tx.objectStore("events").put({ scope, id: "other", operation: other });
+      tx.objectStore("partitions").put(true, scope);
+      tx.oncomplete = resolve;
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+    localStorage.setItem(
+      `buzz-outbox-v1:${scope}-legacy`,
+      JSON.stringify([old, other]),
+    );
+    const { browserOutboxStorage, purgeOutboxStorage } = await import(
+      "/src/features/relay/outbox-storage.ts"
+    );
+    const store = browserOutboxStorage(scope);
+    const legacy = browserOutboxStorage(`${scope}-legacy`);
+    try {
+      const migrated = (await store.load()).map((row) => row.event.id);
+      await legacy.retire("old", recovery);
+      const rows = await legacy.load();
+      await legacy.save(rows);
+      return {
+        migrated,
+        legacy: (await legacy.load()).map((row) => row.event.id),
+      };
+    } finally {
+      store.close();
+      legacy.close();
+      await purgeOutboxStorage(scope);
+      await purgeOutboxStorage(`${scope}-legacy`);
+    }
+  });
+  expect(result).toEqual({ migrated: ["other"], legacy: ["other"] });
+});
+
 // Exercise the actual incremental IndexedDB journal: a full-array memory store
 // cannot reproduce a stale window deleting another window's renewed receipt.
 test("forgetting a stale receipt relinquishes its journal deletion ownership", async ({

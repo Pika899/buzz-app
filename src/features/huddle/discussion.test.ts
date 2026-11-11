@@ -66,6 +66,9 @@ function harness(room = "room", delivery: "failed" | "unknown" = "failed") {
       recovery: async () => undefined,
       recover: async () => {},
       acknowledge: async () => {},
+      retire: async () => {
+        throw new Error("Unexpected retirement");
+      },
       snapshot: () => [pending],
       retry,
       dismiss,

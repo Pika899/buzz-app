@@ -532,6 +532,34 @@ an approximate timestamp. Channel windows retain verified event inputs so local
 edits can fold against the original message; rejected edits stop contributing.
 The timeline, channel-list preview and filtered plugin views share that operation.
 
+### Eventual cleanup of obsolete receipts
+
+`outbox.retire(id, recovery)` removes an obsolete guarded receipt, including a
+restored `unknown` receipt. The caller first saves its domain completion and the
+exact event ID and recovery key/value. It must permanently revoke admission for
+that event in every live owner. This method does not cancel delivery, prove that
+an event was not sent, or make an uncertain command safe to repeat.
+
+The method returns `pending` while this window has an active attempt, live
+admission, or removal in progress. The caller retains its cleanup intent and
+tries again after an outbox update or reconnect. A storage error rejects the
+call and preserves local intent. A present receipt must be guarded and match
+both recovery fields. An absent receipt can also be retired, because an earlier
+save can still arrive later.
+
+`retired` means that the journal stores a terminal marker for this event ID and
+removes its saved receipt in one transaction. Later saves cannot restore that
+ID. The marker survives reload and remains until the partition is purged.
+Other windows can retain a stale local row until their caller runs cleanup;
+retirement does not wait for those windows or their queued saves. It adds no
+relay read or background timer. Existing send, retry, adoption and dismissal
+locks keep their current behavior.
+
+Plugins that support older hosts must check that `outbox.retire` is a function
+before use. If it is absent, retain the cleanup intent. The host's browser
+journal uses database version 3. A downgrade cannot open that journal; do not
+delete saved intent to bypass the version check.
+
 ## Bounds and lifecycle
 
 - Reads: three active slots, at most one background request, 128 pending distinct

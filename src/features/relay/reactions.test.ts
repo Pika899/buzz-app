@@ -157,6 +157,9 @@ it("removal validates every loaded author and conversation before queuing one de
       recovery: async () => undefined,
       recover: async () => {},
       acknowledge: async () => {},
+      retire: async () => {
+        throw new Error("Unexpected retirement");
+      },
       supports: () => true,
       send,
       retry() {},
@@ -205,6 +208,9 @@ it("requires matching viewer and agent identities to remove agent messages", () 
       recovery: async () => undefined,
       recover: async () => {},
       acknowledge: async () => {},
+      retire: async () => {
+        throw new Error("Unexpected retirement");
+      },
       supports: () => true,
       send,
       retry() {},
@@ -279,6 +285,9 @@ it("authorizes removal against the relay-attributed agent author, not the relay 
       recovery: async () => undefined,
       recover: async () => {},
       acknowledge: async () => {},
+      retire: async () => {
+        throw new Error("Unexpected retirement");
+      },
       supports: () => true,
       send,
       retry() {},

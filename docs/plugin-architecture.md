@@ -2423,6 +2423,8 @@ not generation. Reactive filtered reads use `session.observe`;
 writes use `session.outbox` or the `session.messages` convenience methods. Reads,
 live traffic and local events share reconciliation, with no separately injected
 write service. Dispose owned views when their plugin or session scope ends.
+For obsolete guarded receipts, use the outbox's
+[eventual cleanup contract](relay-queries.md#eventual-cleanup-of-obsolete-receipts).
 For kind 30177 publication, follow the
 [managed-agent registration guidance](relay-queries.md#managed-agent-registration-kind-30177).
 

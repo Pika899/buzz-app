@@ -54,7 +54,6 @@ export function CanvasEditor({
   const [tab, setTab] = useState<"view" | "edit" | "history">("view");
   const [preview, setPreview] = useState(false);
   const previewButton = useRef<HTMLButtonElement>(null);
-  const saveButton = useRef<HTMLButtonElement>(null);
   const key = `canvas-draft-v1:${channelId}`;
   const draftRevision = useSyncExternalStore(
     useCallback((notify) => subscribeView(scope, notify), [scope]),
@@ -121,8 +120,7 @@ export function CanvasEditor({
     handoff.current = null;
     if (
       previous === document.activeElement ||
-      (document.activeElement === document.body &&
-        (!previous.isConnected || previous === saveButton.current))
+      (!previous.isConnected && document.activeElement === document.body)
     )
       (tab === "view"
         ? view
@@ -284,13 +282,15 @@ export function CanvasEditor({
       if (generation === operation.current) setBusy(false);
     }
   };
+  const unchanged = loaded && !dirty && !readOnly;
   const actions =
     tab === "edit" ? (
       <>
         <Button
           ref={previewButton}
-          disabled={!loaded || busy}
-          focusableWhenDisabled={loaded}
+          // The panel host focuses this while the editor is hidden.
+          data-tab-focus={preview || undefined}
+          disabled={!loaded}
           onClick={() => setPreview(!preview)}
         >
           {preview ? "Edit Markdown" : "Preview draft"}
@@ -308,13 +308,10 @@ export function CanvasEditor({
           </Button>
         )}
         <Button
-          ref={saveButton}
           variant="prominent"
           loading={busy}
-          title={loaded && !dirty && !busy ? "No changes to save" : undefined}
-          focusableWhenDisabled={
-            loaded && !dirty && !readOnly ? true : undefined
-          }
+          title={unchanged && !busy ? "No changes to save" : undefined}
+          focusableWhenDisabled={unchanged ? true : undefined}
           disabled={
             readOnly ||
             !loaded ||
@@ -387,7 +384,7 @@ export function CanvasEditor({
           <div className={panelStyles.document}>
             <Textarea
               ref={editor}
-              data-tab-focus
+              data-tab-focus={!preview || undefined}
               readOnly={readOnly || busy}
               hidden={preview}
               aria-label="Canvas Markdown"
@@ -408,7 +405,11 @@ export function CanvasEditor({
                 className={`${panelStyles.preview} ${panelStyles.markdown}`}
                 aria-label="Canvas draft preview"
               >
-                <CanvasMarkdown content={draft} openLink={openViewLink} />
+                {draft ? (
+                  <CanvasMarkdown content={draft} openLink={openViewLink} />
+                ) : (
+                  <p className="text-secondary">This draft is empty.</p>
+                )}
               </section>
             )}
             <div
@@ -416,7 +417,7 @@ export function CanvasEditor({
               role="status"
               className={panelStyles.status}
             >
-              {loaded && dirty ? "Unsaved changes" : ""}
+              {loaded && dirty && !readOnly ? "Unsaved changes" : ""}
             </div>
           </div>
           {error && (

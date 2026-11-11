@@ -125,8 +125,10 @@ it("keeps editing after a save and uses the saved revision for the next edit", a
   expect(status()).toHaveTextContent("Unsaved changes");
   try {
     await user.click(screen.getByRole("button", { name: "Save Canvas" }));
-    // Native WebKit can drop focus to the body when Save becomes disabled.
-    (document.activeElement as HTMLElement).blur();
+    // A background write leaves the draft-only toggle usable.
+    expect(
+      screen.getByRole("button", { name: "Preview draft" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
   } finally {
     await act(() => finishSave(saved));
   }
@@ -170,6 +172,18 @@ it("previews the current draft without saving and returns to the same editor", a
   const text = screen.getByRole("textbox", { name: "Canvas Markdown" });
   await waitFor(() => expect(text).toHaveValue("Saved"));
   const status = screen.getByRole("status");
+  fireEvent.change(text, { target: { value: "" } });
+  await user.click(screen.getByRole("button", { name: "Preview draft" }));
+  expect(
+    screen.getByRole("region", { name: "Canvas draft preview" }),
+  ).toHaveTextContent("This draft is empty.");
+  // The panel host's focus target follows the visible control.
+  expect(screen.getByRole("button", { name: "Edit Markdown" })).toHaveAttribute(
+    "data-tab-focus",
+  );
+  expect(text).not.toHaveAttribute("data-tab-focus");
+  await user.click(screen.getByRole("button", { name: "Edit Markdown" }));
+  expect(text).toHaveAttribute("data-tab-focus");
   const draft =
     "# Draft heading\n\n**Unpublished**\n\n- [x] Task\n\n[Docs](https://example.com)";
   fireEvent.change(text, { target: { value: draft } });
@@ -1013,7 +1027,12 @@ it.each([false, true])(
       ).toBeVisible();
     await user.type(text, "cannot change");
     expect(text).toHaveValue(content);
-    expect(screen.getByRole("button", { name: "Save Canvas" })).toBeDisabled();
+    const save = screen.getByRole("button", { name: "Save Canvas" });
+    expect(save).toBeDisabled();
+    // Read-only explains itself; the save hint and unsaved status stay out.
+    await user.hover(save);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
     await openHistory(user);
     expect(await fullRevision(user)).toHaveValue(old.content);
     expect(

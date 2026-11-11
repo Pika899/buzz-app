@@ -628,7 +628,7 @@ revokes all of them, and a pairing unused for 30 days expires.
   256 KiB of text. It opens on **View**, which shows the saved Canvas as
   formatted Markdown; **Edit** changes it. In Edit, **Preview draft** shows
   your unsaved text formatted and **Edit Markdown** returns to the editor;
-  “Unsaved changes” appears until you save, and **Save Canvas** is unavailable
+  “Unsaved changes” shows while your draft differs from the saved Canvas, and **Save Canvas** is unavailable
   when nothing changed. Very large or deeply nested Canvases show their Markdown source in View
   instead. **History** shows how each saved version differs from the current
   Canvas, with + marking lines only that version has and − marking current

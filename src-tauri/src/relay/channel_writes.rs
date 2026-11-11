@@ -896,6 +896,45 @@ mod boundary_tests {
         late.tags.push(vec!["ttl".into(), String::new()]);
         assert!(!details(&late));
     }
+    #[test]
+    fn publisher_details_validate_at_sign_and_publish_boundaries() {
+        let host = IdentityHost::fixture();
+        for publisher in [String::new(), "a".repeat(64)] {
+            for extra in [
+                vec![vec!["message_publisher".into(), publisher.clone()]],
+                vec![
+                    vec!["join_role".into(), "guest".into()],
+                    vec!["message_publisher".into(), publisher.clone()],
+                    vec!["t".into(), "updates".into()],
+                ],
+            ] {
+                let event = serde_json::to_value(details_event(extra)).unwrap();
+                let parsed = validate("channel-details", &event, None).unwrap();
+                let signed = tauri::async_runtime::block_on(host.sign(parsed)).unwrap();
+                assert!(validate("channel-details", &signed, signed["pubkey"].as_str()).is_ok());
+            }
+        }
+        for extra in [
+            vec![vec!["message_publisher".into(), "bad".into()]],
+            vec![vec!["message_publisher".into()]],
+            vec![vec![
+                "message_publisher".into(),
+                "a".repeat(64),
+                "extra".into(),
+            ]],
+            vec![
+                vec!["message_publisher".into(), "a".repeat(64)],
+                vec!["message_publisher".into(), "b".repeat(64)],
+            ],
+            vec![
+                vec!["message_publisher".into(), "a".repeat(64)],
+                vec!["join_role".into(), "guest".into()],
+            ],
+        ] {
+            let event = serde_json::to_value(details_event(extra)).unwrap();
+            assert!(validate("channel-details", &event, None).is_err());
+        }
+    }
 }
 
 /// NIP-CL label: 1–64 of `[a-z0-9.:-]`, never a channel type name.
@@ -983,45 +1022,6 @@ mod member_administration_tests {
             );
             let error = invoke("relay_channel_sign", event).unwrap_err();
             assert!(!error.to_string().contains("not allowed"), "{error}");
-        }
-    }
-    #[test]
-    fn publisher_details_validate_at_sign_and_publish_boundaries() {
-        let host = IdentityHost::fixture();
-        for publisher in [String::new(), "a".repeat(64)] {
-            for extra in [
-                vec![vec!["message_publisher".into(), publisher.clone()]],
-                vec![
-                    vec!["join_role".into(), "guest".into()],
-                    vec!["message_publisher".into(), publisher.clone()],
-                    vec!["t".into(), "updates".into()],
-                ],
-            ] {
-                let event = serde_json::to_value(details_event(extra)).unwrap();
-                let parsed = validate("channel-details", &event, None).unwrap();
-                let signed = tauri::async_runtime::block_on(host.sign(parsed)).unwrap();
-                assert!(validate("channel-details", &signed, signed["pubkey"].as_str()).is_ok());
-            }
-        }
-        for extra in [
-            vec![vec!["message_publisher".into(), "bad".into()]],
-            vec![vec!["message_publisher".into()]],
-            vec![vec![
-                "message_publisher".into(),
-                "a".repeat(64),
-                "extra".into(),
-            ]],
-            vec![
-                vec!["message_publisher".into(), "a".repeat(64)],
-                vec!["message_publisher".into(), "b".repeat(64)],
-            ],
-            vec![
-                vec!["message_publisher".into(), "a".repeat(64)],
-                vec!["join_role".into(), "guest".into()],
-            ],
-        ] {
-            let event = serde_json::to_value(details_event(extra)).unwrap();
-            assert!(validate("channel-details", &event, None).is_err());
         }
     }
 }

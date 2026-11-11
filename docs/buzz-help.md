@@ -910,6 +910,23 @@ available rather than silently discarding it.
   that Builderlab server's site, where the account's usage and billing are.
   The **Remote agent** hint in a signed-in Builderlab agent's **Identity** tab
   also links to **See usage and billing** on that site.
+- Some builds offer **AI settings → Automatic (Recommended)** when creating an
+  agent. Buzz picks the first recommended harness that is set up on this
+  computer, with its model and thinking level, shows it as **Uses** with the
+  model and level, and keeps those current in later versions. It never changes
+  the harness afterwards. If no recommended model is offered when the agent
+  runs, it uses the harness's default. If nothing recommended is set up on this
+  computer, a row asks you to set up Goose, Codex or Claude first, with a
+  **Set up** button, and Create waits. **Manual** opens
+  Harness, Model and Thinking in place, starting from what Automatic picked. An
+  agent's **Identity** tab shows the same **AI settings** row; changing the
+  model, provider or thinking level there turns Automatic off. Automatic is
+  for local harnesses; a remote agent such as Builderlab is chosen under
+  Manual's **Harness** and keeps its own model choices. Beside Send, an agent
+  on Automatic has no model or thinking choice, only its session controls
+  where they apply; to choose per message, switch it to **Manual**. A pick
+  saved in a Solo chat before it switched is ignored. Builds without a
+  recommendation show none of this.
 - Desktop's **Harness** menu groups agent types under **Remote** and **Local**.
   Creating a remote agent on desktop opens an introduction with its chosen name
   and avatar, explaining its online workspace and file access (Builderlab

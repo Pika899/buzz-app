@@ -169,6 +169,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     defaults: providerDefaults,
     runtime,
     openSetup,
+    recommended,
   });
   agents.register<Config>({
     id: TYPE_ID,

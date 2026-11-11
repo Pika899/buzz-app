@@ -31,7 +31,7 @@ import { soloChat } from "../agents/solo-chat";
 import type { EventData } from "../relay/events";
 import type { RelayData } from "../relay/service";
 import { threadReference } from "../relay/thread-reference";
-import { MemoryReads, READ_TIMEOUT_MS } from "./core-memory";
+import { keepingLastCore, MemoryReads, READ_TIMEOUT_MS } from "./core-memory";
 import { wakeAnchor, wakeLands } from "./plugin-wake";
 import { readAuthorNames } from "./author-names";
 import { ownerCanvas, readProject } from "./project";
@@ -188,6 +188,8 @@ const CONVERSATION_READ_TIMEOUT_MS = 4_000;
 export function harnessKit(sources: Sources): HarnessKit {
   const admitted = new WeakMap<HarnessConversation, Admitted>();
   const memoryReads = new MemoryReads();
+  // Its last read `core` memory stands in for a failed read.
+  const core = keepingLastCore(sources.core);
   const session = (key: AgentKey) => {
     const snapshot = sources.relay(key)?.snapshot();
     return snapshot?.status === "ready" ? snapshot.session : undefined;
@@ -275,7 +277,7 @@ export function harnessKit(sources: Sources): HarnessKit {
       { agent, team }: Delivery,
       { scope, cwd, instructions, tools = true },
     ) {
-      const memory = await sources.core(agent.key);
+      const memory = await core(agent.key);
       const text = systemPrompt({
         scope,
         cwd,

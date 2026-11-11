@@ -257,7 +257,9 @@ export function ChannelInventory({
     () =>
       queries.directMessages.subscribeOpened(
         () =>
-          void lifecycle.refreshVisibility(visibilityRequest.current?.signal),
+          void lifecycle.refreshVisibility(visibilityRequest.current?.signal, {
+            trailing: true,
+          }),
       ),
     [queries, lifecycle],
   );

@@ -56,10 +56,12 @@ export interface ChannelLifecycleCapability {
   snapshot(): DmVisibility;
   subscribe(listener: () => void): () => void;
   /** `ifStale` lets a read that succeeded within `FRESH_FOR` answer, for
-   * triggers that only suggest visibility may have changed. */
+   * triggers that only suggest visibility may have changed. `trailing` needs
+   * a read that starts after this call: repeated calls during a pending read
+   * share one more read after it. */
   refreshVisibility(
     signal?: AbortSignal,
-    options?: { ifStale?: boolean },
+    options?: { ifStale?: boolean; trailing?: boolean },
   ): Promise<void>;
   observeRemoval(listener: (channelId: string) => void): () => void;
 }
@@ -100,6 +102,8 @@ export function createChannelLifecycle({
   let refresh: Promise<void> | undefined;
   let refreshSignal: AbortSignal | undefined;
   let refreshController: AbortController | undefined;
+  // The one read `trailing` refreshes queue behind a pending read.
+  let trailing: Promise<void> | undefined;
   // When this epoch's last visibility refresh succeeded.
   let refreshedAt: number | undefined;
   const available = !!reader && !!writer;
@@ -321,9 +325,24 @@ export function createChannelLifecycle({
         listeners.delete(listener);
       };
     },
-    refreshVisibility(caller?: AbortSignal, options?: { ifStale?: boolean }) {
+    refreshVisibility(
+      caller?: AbortSignal,
+      options?: { ifStale?: boolean; trailing?: boolean },
+    ) {
       if (!reader || closed || caller?.aborted) return Promise.resolve();
-      if (refresh && !refreshSignal?.aborted) return refresh;
+      if (refresh && !refreshSignal?.aborted) {
+        if (!options?.trailing) return refresh;
+        // The pending read may predate this call.
+        if (!trailing) {
+          const started = epoch;
+          const next: Promise<void> = refresh.then(() => {
+            if (trailing === next) trailing = undefined;
+            if (started === epoch) return capability.refreshVisibility(caller);
+          });
+          trailing = next;
+        }
+        return trailing;
+      }
       if (
         options?.ifStale &&
         snapshot.status === "ready" &&
@@ -597,6 +616,7 @@ export function createChannelLifecycle({
       refreshController?.abort();
       for (const controller of controllers.keys()) controller.abort();
       refresh = undefined;
+      trailing = undefined;
       refreshedAt = undefined;
       visibility = undefined;
       emit({ status: "idle", hidden: Object.freeze([]) });

@@ -104,6 +104,7 @@ export function createNotificationSoundPlayback(
     stop() {
       if (controller.signal.aborted) return;
       controller.abort();
+      clearTimeout(startupTimeout);
       if (source) {
         source.onended = null;
         if (started) source.stop();
@@ -113,9 +114,10 @@ export function createNotificationSoundPlayback(
       finish();
     },
   };
+  const startupTimeout = setTimeout(playback.stop, 1_000);
   void (async () => {
     const [, response] = await Promise.all([
-      context.resume(),
+      context.resume().then(() => clearTimeout(startupTimeout)),
       fetch(`/sounds/${name}.mp3`, { signal: controller.signal }),
     ]);
     if (!response.ok) throw new Error("Could not load notification sound");

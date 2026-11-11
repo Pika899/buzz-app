@@ -54,6 +54,7 @@ function harness() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 it("stays silent without Web Audio or for Silent, without falling back to a media element", () => {
@@ -95,6 +96,79 @@ it("plays a one-shot buffer, restarts the same sound, and releases audio resourc
   expect(next.source.disconnect).toHaveBeenCalledOnce();
   expect(next.close).toHaveBeenCalledOnce();
   expect(env.audio).not.toHaveBeenCalled();
+});
+
+it("releases an autoplay-blocked context at the startup deadline and ignores late resume", async () => {
+  vi.useFakeTimers();
+  const env = harness();
+  const resumed = deferred<void>();
+  env.resume.mockImplementationOnce(() => resumed.promise);
+  const playback = playNotificationSound("ping");
+  assert(playback);
+  const context = env.contexts[0];
+  assert(context);
+  const finished = vi.fn();
+  void playback.finished.then(finished);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(finished).not.toHaveBeenCalled();
+  expect(context.close).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(finished).toHaveBeenCalledOnce();
+  await playback.finished;
+  expect(context.close).toHaveBeenCalledOnce();
+  expect(env.fetch).toHaveBeenCalledWith("/sounds/ping.mp3", {
+    signal: expect.objectContaining({ aborted: true }),
+  });
+  expect(vi.getTimerCount()).toBe(0);
+  resumed.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(env.started).not.toHaveBeenCalled();
+  playback.stop();
+  expect(context.close).toHaveBeenCalledOnce();
+
+  const retry = playNotificationSound("ping");
+  assert(retry);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(env.contexts[1]?.source.start).toHaveBeenCalledOnce();
+  env.contexts[1]?.source.onended?.();
+  await retry.finished;
+});
+
+it("clears the startup deadline when cancelled before resume", async () => {
+  vi.useFakeTimers();
+  const env = harness();
+  const resumed = deferred<void>();
+  env.resume.mockImplementationOnce(() => resumed.promise);
+  const playback = playNotificationSound("doo");
+  assert(playback);
+  playback.stop();
+  await playback.finished;
+  expect(vi.getTimerCount()).toBe(0);
+  expect(env.contexts[0]?.close).toHaveBeenCalledOnce();
+  resumed.resolve();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(env.started).not.toHaveBeenCalled();
+  expect(env.contexts[0]?.close).toHaveBeenCalledOnce();
+});
+
+it("clears the startup deadline after resume, even while the sound is loading", async () => {
+  vi.useFakeTimers();
+  const env = harness();
+  const response = deferred<Awaited<ReturnType<typeof env.fetch>>>();
+  env.fetch.mockImplementationOnce(() => response.promise);
+  const playback = playNotificationSound("boo");
+  assert(playback);
+  const context = env.contexts[0];
+  assert(context);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(vi.getTimerCount()).toBe(0);
+  expect(context.close).not.toHaveBeenCalled();
+  response.resolve({ ok: true, arrayBuffer: async () => env.bytes });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(context.source.start).toHaveBeenCalledOnce();
+  context.source.onended?.();
+  await playback.finished;
+  expect(context.close).toHaveBeenCalledOnce();
 });
 
 it.each(["fetch", "decode"] as const)(

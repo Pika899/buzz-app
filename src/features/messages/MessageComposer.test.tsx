@@ -2487,6 +2487,56 @@ it("sends shortcodes while the catalog load is pending", async () => {
   }
 });
 
+it("previews no shortcode a pending catalog would leave literal", async () => {
+  const catalog = deferred<RelayEvent[]>();
+  const party = signed(keypair(), {
+    kind: 30030,
+    content: "",
+    created_at: 1700000000,
+    tags: [
+      ["d", "buzz:custom-emoji"],
+      ["emoji", "party", "https://a.test/party.png"],
+    ],
+  });
+  let reads = 0;
+  const h = await mountUploadComposer({
+    emojiRead: () => (reads++ ? Promise.resolve([party]) : catalog.promise),
+  });
+  const chips = () => h.input().querySelectorAll("[data-source]").length;
+  try {
+    await waitFor(() =>
+      expect(h.owner.session.emoji.snapshot().status).toBe("loading"),
+    );
+    // A live set arrives before the catalog read settles.
+    await act(() =>
+      h.owner.session.read([
+        { kinds: [30030], authors: [party.pubkey], limit: 1 },
+      ]),
+    );
+    expect(h.owner.session.emoji.snapshot()).toMatchObject({
+      status: "loading",
+      entries: [{ shortcode: "party" }],
+    });
+    await userEvent.type(h.input(), "hello :party:");
+    expect(chips()).toBe(0);
+    fireEvent.click(h.send());
+    await waitFor(() => expect(h.publish).toHaveBeenCalledTimes(1));
+    expect(
+      h.publish.mock.calls[0]?.[0].tags.some(
+        ([name]: string[]) => name === "emoji",
+      ),
+    ).toBe(false);
+    await act(async () => catalog.resolve([party]));
+    await waitFor(() =>
+      expect(h.owner.session.emoji.snapshot().status).toBe("ready"),
+    );
+    await userEvent.type(h.input(), ":party:");
+    await waitFor(() => expect(chips()).toBe(1));
+  } finally {
+    await act(async () => catalog.resolve([]));
+  }
+});
+
 it("publishes attachments with literal shortcodes when the catalog is unavailable", async () => {
   const h = await mountUploadComposer({
     emojiRead: async () => {

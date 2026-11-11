@@ -125,6 +125,7 @@ import {
 import styles from "./Messages.module.css";
 import { messageViewKey } from "./view-key";
 import { isEmojiOnly, usesLargeEmojiPresentation } from "./emoji-size";
+import type { CustomEmoji } from "../relay/emoji";
 import {
   legacyFollowupDraft,
   MAX_DRAFT_GIFS,
@@ -177,6 +178,7 @@ const noChannels: ReturnType<ComposerSession["channels"]["list"]> = {
   channels: [],
 };
 const noSubscription = () => () => {};
+const noEmoji: readonly CustomEmoji[] = [];
 
 type AcceptedDraft = {
   next: MentionDraft;
@@ -1394,10 +1396,10 @@ function Composer({
     session.emoji.snapshot,
     session.emoji.snapshot,
   );
-  const largeEmojiDraft = usesLargeEmojiPresentation(
-    draft,
-    emojiCatalog.entries,
-  );
+  // A send tags shortcodes only from a ready catalog, so preview the same.
+  const draftEmoji =
+    emojiCatalog.status === "ready" ? emojiCatalog.entries : noEmoji;
+  const largeEmojiDraft = usesLargeEmojiPresentation(draft, draftEmoji);
   const completion = useCompletionEditor(
     input,
     active && !editingDisabled && !!outbox?.supports(9),
@@ -3410,7 +3412,7 @@ function Composer({
               scope={scope}
               channelId={channelId}
               extensions={extensions}
-              emoji={emojiCatalog.entries}
+              emoji={draftEmoji}
               onPasteTooLong={() => setPasteTooLong(true)}
               aria-describedby={
                 pasteTooLong ? `${inputId}-paste-error` : undefined

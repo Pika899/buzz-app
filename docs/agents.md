@@ -42,7 +42,7 @@ attachments. Replies use the source conversation.
 
 `ready()` opens only the plugin's local keyed storage. `matches()` selects the
 sources the plugin manages. Exactly one router can match a source. Its
-`prepare()` receives the agent, owner, harness, source, invocation ID, logical
+`prepare()` receives the agent, owner, harness, source, conversation, invocation ID, logical
 `sessionKey`, `intent`, `adopted`, `resumed`, saved association and abort signal.
 An owner message supplies `event`. A trusted wake has no signed event.
 Returning `undefined` leaves an unassociated run unchanged.
@@ -64,6 +64,10 @@ The host keeps its existing execution claims. These local records do not add a
 cross-device execution guarantee.
 
 A native type opts in with `sessionAdmission: true`. It must carry
+out its authority and scope checks, then call `Delivery.prepareSession` with
+the source and native conversation before handover. A channel-scoped session
+can include several source threads. The type carries the returned session and
+context as `Delivery.session` and `Delivery.sessionContext`. It carries
 `Delivery.session` into its tool context and `Delivery.sessionContext` into its
 prompt. Claude, Codex, goose and Pi implement this contract. With no router and
 no saved association, the extension adds no execution or publication work.

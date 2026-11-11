@@ -3,8 +3,8 @@ import {
   createSessionAdmissions,
   type AgentSessionRouter,
   type AgentSessionAssociation,
+  type AgentSessionSource,
 } from "./session-admission";
-import { fromOwner, workflowOf } from "./owner-attestation";
 import type {} from "../navigation/service";
 import {
   createAgentExecutions,
@@ -702,6 +702,15 @@ export type Delivery<Config = unknown> = Readonly<{
   trigger: Trigger;
   session?: AgentSessionAssociation;
   sessionContext?: string;
+  /** The native adapter calls this after authority and conversation checks. */
+  prepareSession?(
+    placement: Readonly<{
+      source: AgentSessionSource;
+      conversation: AgentSessionSource;
+    }>,
+  ): Promise<
+    Readonly<{ session: AgentSessionAssociation; context?: string }> | undefined
+  >;
   /** The live route's channel; absent when the wire scope was ambiguous. */
   channelId?: string;
   agent: AgentHandle;
@@ -2168,63 +2177,23 @@ export class AgentsService extends Service implements Agents {
     /** The catch-up progress this program last read or saved. */
     let savedProgress: Checkpoints = {};
     this.runners = new AgentRunners({
-      prepareSession: async (agent, type, trigger, channelId, signal) => {
+      prepareSession: async (agent, type, trigger, placement, signal) => {
         if (
           !this.sessionAdmissions.active() ||
           !type.sessionAdmission ||
-          !type.sessionControls ||
           (trigger.type !== "mention" &&
             trigger.type !== "plugin" &&
             trigger.type !== "attention")
         )
           return;
-        const event = trigger.type === "mention" ? trigger.event : undefined;
-        const channel =
-          channelId ??
-          (trigger.type !== "mention" ? trigger.channel : undefined);
-        if (!channel) return;
-        if (
-          event &&
-          !(await fromOwner(
-            event,
-            agent.owner,
-            workflowOf(
-              ownerReads(this.relay(agent.key), agent.pubkey),
-              agent.pubkey,
-            ),
-          ))
-        )
-          return;
-        const summary = this.channelOf(agent, { tags: [["h", channel]] });
-        const whole =
-          type.sessionControls.scope(agent) === "channel" ||
-          summary?.channelType === "dm" ||
-          summary?.channelType === "solo" ||
-          (trigger.type !== "mention" && trigger.topLevel === true);
-        const root = whole
-          ? undefined
-          : event
-            ? (threadReference(event)?.rootId ?? event.id)
-            : trigger.type !== "mention"
-              ? trigger.root
-              : undefined;
-        const sourceRoot = event
-          ? (threadReference(event)?.rootId ?? event.id)
-          : trigger.type !== "mention"
-            ? trigger.root
-            : undefined;
         return this.sessionAdmissions.prepare({
           agent: agent.key,
           owner: agent.owner,
           harness: agent.type,
-          source: {
-            channelId: channel,
-            ...(sourceRoot ? { root: sourceRoot } : {}),
-          },
-          conversation: { channelId: channel, ...(root ? { root } : {}) },
+          ...placement,
           invocationId:
-            event?.id ?? (trigger.type !== "mention" ? trigger.id : ""),
-          ...(event ? { event } : {}),
+            trigger.type === "mention" ? trigger.event.id : trigger.id,
+          ...(trigger.type === "mention" ? { event: trigger.event } : {}),
           resumed: trigger.type === "mention" && !!trigger.resumed,
           signal,
         });

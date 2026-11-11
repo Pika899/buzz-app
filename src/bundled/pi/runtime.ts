@@ -529,8 +529,9 @@ export class PiRuntime {
     acknowledged,
     superseded,
     interruptible,
-    session,
-    sessionContext,
+    session: givenSession,
+    sessionContext: givenSessionContext,
+    prepareSession,
   }: Delivery) {
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
     if (
@@ -571,7 +572,24 @@ export class PiRuntime {
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
-    const key = await this.key(entry, agent.key, event, channel, topLevel);
+    const { key, source } = await this.key(
+      entry,
+      agent.key,
+      event,
+      channel,
+      topLevel,
+    );
+    const admitted = await prepareSession?.({
+      source,
+      conversation: {
+        channelId: channel,
+        ...(key !== channel
+          ? { root: threadReference(event)?.rootId ?? event.id }
+          : {}),
+      },
+    });
+    const session = admitted?.session ?? givenSession;
+    const sessionContext = admitted?.context ?? givenSessionContext;
     const root = threadReference(event)?.rootId ?? event.id;
     const where = { channel, root, topLevel };
     // A turn keeps the posting policy it was admitted with: a request under
@@ -606,25 +624,30 @@ export class PiRuntime {
         key,
       });
       const prompt = async () =>
-        this.review(
-          entry,
-          turnPrompt({
-            ...(await this.turn(
-              agent,
-              event,
-              channel,
-              key,
-              topLevel,
-              seen,
-              solo,
-            )),
-            agent: agent.key,
-            channelLevel: topLevel && !solo,
-            ...(wake
-              ? { wake: { ...wake, text: (await wakeText?.()) ?? wake.text } }
-              : {}),
-          }),
-        );
+        [
+          sessionContext,
+          this.review(
+            entry,
+            turnPrompt({
+              ...(await this.turn(
+                agent,
+                event,
+                channel,
+                key,
+                topLevel,
+                seen,
+                solo,
+              )),
+              agent: agent.key,
+              channelLevel: topLevel && !solo,
+              ...(wake
+                ? { wake: { ...wake, text: (await wakeText?.()) ?? wake.text } }
+                : {}),
+            }),
+          ),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
       // A conversation's tools default to its thread; a conversation shared
       // by several threads is told which to reply in instead.
       const context: Context = {
@@ -655,9 +678,7 @@ export class PiRuntime {
         ...(superseded ? { superseded } : {}),
       });
       const picked = await this.turnOf(entry, agent.key, model, effort);
-      const text = [sessionContext, await prompt()]
-        .filter(Boolean)
-        .join("\n\n");
+      const text = await prompt();
       this.live(entry, agent.key);
       if (interrupted || (wake && current && !current())) return;
       submitted = await this.deliver(
@@ -1259,9 +1280,17 @@ export class PiRuntime {
     topLevel: boolean,
   ) {
     const summary = await this.reads(agent)?.channel(channelId);
-    return topLevel || summary?.dm === true || entry.config.scope === "channel"
-      ? channelId
-      : `${channelId}/${threadReference(event)?.rootId ?? event.id}`;
+    const root = threadReference(event)?.rootId ?? event.id;
+    return {
+      key:
+        topLevel || summary?.dm === true || entry.config.scope === "channel"
+          ? channelId
+          : `${channelId}/${root}`,
+      source: {
+        channelId,
+        ...(!topLevel && summary?.dm !== true ? { root } : {}),
+      },
+    };
   }
 
   /** What the event's prompt needs: its channel and thread, and the messages

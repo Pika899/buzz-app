@@ -878,8 +878,6 @@ export class ClaudeRuntime {
       superseded,
       interruptible,
       named,
-      session,
-      sessionContext,
     } = delivery;
     const settings = this.resolveConfig(
       raw,
@@ -930,7 +928,24 @@ export class ClaudeRuntime {
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
-    const key = await this.key(entry, agent, event, channel, topLevel);
+    const { key, source } = await this.key(
+      entry,
+      agent,
+      event,
+      channel,
+      topLevel,
+    );
+    const admitted = await delivery.prepareSession?.({
+      source,
+      conversation: {
+        channelId: channel,
+        ...(key !== channel
+          ? { root: threadReference(event)?.rootId ?? event.id }
+          : {}),
+      },
+    });
+    const session = admitted?.session ?? delivery.session;
+    const sessionContext = admitted?.context ?? delivery.sessionContext;
     signal.throwIfAborted();
     if (this.execution && (await this.inspect?.(agent.key))) {
       const handoff = this.controls.deliver(
@@ -945,7 +960,13 @@ export class ClaudeRuntime {
           const accepted = deferred ? runtime.target?.signal : signal;
           if (!accepted)
             throw new Error("The remote Claude lifetime is unavailable");
-          await runtime.run({ ...delivery, signal: accepted });
+          await runtime.run({
+            ...delivery,
+            session,
+            sessionContext,
+            prepareSession: undefined,
+            signal: accepted,
+          });
         },
       );
       if (handoff.deferred) {
@@ -1263,9 +1284,17 @@ export class ClaudeRuntime {
     topLevel: boolean,
   ) {
     const summary = await this.reads(agent.key)?.channel(channelId);
-    return topLevel || summary?.dm === true || entry.config.scope === "channel"
-      ? channelId
-      : `${channelId}/${threadReference(event)?.rootId ?? event.id}`;
+    const root = threadReference(event)?.rootId ?? event.id;
+    return {
+      key:
+        topLevel || summary?.dm === true || entry.config.scope === "channel"
+          ? channelId
+          : `${channelId}/${root}`,
+      source: {
+        channelId,
+        ...(!topLevel && summary?.dm !== true ? { root } : {}),
+      },
+    };
   }
 
   /** Where the event's turn goes, and what its prompt needs. */

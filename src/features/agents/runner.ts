@@ -1,5 +1,8 @@
 import { interestPaused } from "./attention";
-import type { AgentSessionAssociation } from "./session-admission";
+import type {
+  AgentSessionAssociation,
+  AgentSessionSource,
+} from "./session-admission";
 // The agent runner: one queue per agent, its rate limit, mention and watch
 // matching, due timers, the run deadline and the claim that lets exactly one
 // host run each agent. It knows nothing of where it runs: everything it needs
@@ -496,7 +499,10 @@ export type RunnerHost = {
     agent: Agent,
     type: RegisteredAgentType,
     trigger: Trigger,
-    channelId: string | undefined,
+    placement: Readonly<{
+      source: AgentSessionSource;
+      conversation: AgentSessionSource;
+    }>,
     signal: AbortSignal,
   ): Promise<
     | Readonly<{
@@ -2709,24 +2715,35 @@ export class AgentRunners {
       const start = await this.host.start(agent);
       if (!start.ok) throw new Error(start.reason);
       const team = this.host.team(agent.key);
-      const admitted = await this.host.prepareSession?.(
-        agent,
-        type,
-        job.trigger,
-        job.channelId,
-        signal,
-      );
-      releaseSession = admitted?.release;
-      if (admitted) job.work?.associate(admitted.session);
+      let admission:
+        | ReturnType<NonNullable<RunnerHost["prepareSession"]>>
+        | undefined;
+      const prepareSession: NonNullable<
+        import("./service").Delivery["prepareSession"]
+      > = async (placement) => {
+        admission ??=
+          this.host.prepareSession?.(
+            agent,
+            type,
+            job.trigger,
+            placement,
+            signal,
+          ) ?? Promise.resolve(undefined);
+        const admitted = await admission;
+        releaseSession = admitted?.release;
+        if (admitted) job.work?.associate(admitted.session);
+        signal.throwIfAborted();
+        return admitted
+          ? {
+              session: admitted.session,
+              ...(admitted.context ? { context: admitted.context } : {}),
+            }
+          : undefined;
+      };
       signal.throwIfAborted();
       const delivery = Object.freeze({
         trigger: job.trigger,
-        ...(admitted
-          ? {
-              session: admitted.session,
-              ...(admitted.context ? { sessionContext: admitted.context } : {}),
-            }
-          : {}),
+        ...(type.sessionAdmission ? { prepareSession } : {}),
         ...(job.channelId ? { channelId: job.channelId } : {}),
         agent: handle,
         config: start.config,
@@ -2741,7 +2758,7 @@ export class AgentRunners {
               ignored: () => job.work?.remove(),
               acknowledged: () => {
                 job.work?.started();
-                admitted?.acknowledged();
+                void admission?.then((admitted) => admitted?.acknowledged());
               },
               superseded: () => job.work?.supersede(),
               interruptible: (stop: () => Promise<void>) =>
@@ -2750,8 +2767,12 @@ export class AgentRunners {
                 job.work?.step(tool, target),
             }
           : {}),
-        ...(!job.work && admitted
-          ? { acknowledged: admitted.acknowledged }
+        ...(!job.work && type.sessionAdmission
+          ? {
+              acknowledged: () => {
+                void admission?.then((admitted) => admitted?.acknowledged());
+              },
+            }
           : {}),
         ...(named ? { named } : {}),
         current: () =>

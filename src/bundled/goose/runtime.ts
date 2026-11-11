@@ -385,8 +385,9 @@ export class GooseRuntime {
     superseded,
     interruptible,
     named,
-    session,
-    sessionContext,
+    session: givenSession,
+    sessionContext: givenSessionContext,
+    prepareSession,
   }: Delivery) {
     const settings = config(raw);
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
@@ -464,6 +465,12 @@ export class GooseRuntime {
       });
       return {
         key: turn.key,
+        source: {
+          channelId: channel,
+          ...(!topLevel && !turn.channel.dm
+            ? { root: threadReference(event)?.rootId ?? event.id }
+            : {}),
+        },
         shown: turn.shown,
         place: where.name
           ? `#${where.name}`
@@ -473,7 +480,18 @@ export class GooseRuntime {
         text: resumed ? `${text}\n\n${RESUMED_PROMPT}` : text,
       };
     };
-    const { key, text: prepared, place, shown } = await prompt(false);
+    const { key, text: prepared, place, shown, source } = await prompt(false);
+    const admitted = await prepareSession?.({
+      source,
+      conversation: {
+        channelId: channel,
+        ...(key !== channel
+          ? { root: threadReference(event)?.rootId ?? event.id }
+          : {}),
+      },
+    });
+    const session = admitted?.session ?? givenSession;
+    const sessionContext = admitted?.context ?? givenSessionContext;
     signal.throwIfAborted();
     const handoff = this.controls.deliver(
       `${agent.key}/${key}`,

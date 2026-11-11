@@ -1641,6 +1641,18 @@ export class CodexRuntime {
     const root = settings.scope === "channel" ? undefined : toolRoot;
     delivery.signal.throwIfAborted();
     const conversationKey = JSON.stringify([channelId, root ?? "channel"]);
+    const admitted = await delivery.prepareSession?.({
+      source: { channelId, ...(toolRoot ? { root: toolRoot } : {}) },
+      conversation: { channelId, ...(root ? { root } : {}) },
+    });
+    if (admitted)
+      delivery = {
+        ...delivery,
+        session: admitted.session,
+        sessionContext: admitted.context,
+        prepareSession: undefined,
+      };
+
     if (await this.inspect?.(agent.key)) {
       const handoff = this.controls.deliver(
         `${agent.key}/${conversationKey}`,

@@ -2725,7 +2725,7 @@ export class AgentRunners {
           this.host.prepareSession?.(
             agent,
             type,
-            job.trigger,
+            addressed(job.trigger) ? job.trigger : (anchor ?? job.trigger),
             placement,
             signal,
           ) ?? Promise.resolve(undefined);

@@ -15,6 +15,20 @@ test("link previews draw web cards below messages and let a plugin claim its own
     server: { host: "127.0.0.1", port: 0 },
   });
   await server.listen();
+  // Every height the first card takes while it loads.
+  await page.addInitScript(() => {
+    const heights = [];
+    Object.assign(window, { launchHeights: heights });
+    const sample = () => {
+      const card = document.querySelector(
+        '[data-link-previews] a[href="https://news.example.com/launch"]',
+      );
+      const height = card?.getBoundingClientRect().height;
+      if (height && heights.at(-1) !== height) heights.push(height);
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   try {
     await page.goto(
       `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/link-previews.html`,
@@ -27,6 +41,8 @@ test("link previews draw web cards below messages and let a plugin claim its own
     await expect(launch).toBeVisible();
     await expect(first).toContainText("Example News · news.example.com");
     await expect(first.locator("img")).toBeVisible();
+    // The card waits for its image, then draws once at its final size.
+    expect(await page.evaluate(() => window.launchHeights)).toHaveLength(1);
     await expect(first.locator("[data-tracker-card]")).toHaveText(
       "Tracker issue 42 · In progress",
     );
@@ -60,9 +76,31 @@ test("link previews draw web cards below messages and let a plugin claim its own
     await expect(
       first.getByRole("link", { name: /Page at tracker\.example\.com/ }),
     ).toBeVisible();
+    const settled = await launch.evaluate(
+      (card) => card.getBoundingClientRect().height,
+    );
     await page.getByRole("button", { name: "Disable link previews" }).click();
     await expect(page.locator("[data-link-previews]")).toHaveCount(0);
-    await page.getByRole("button", { name: "Enable link previews" }).click();
+    // A card that comes back, as a row does when it scrolls into view again,
+    // draws at its settled size on its first frame.
+    const redrawn = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          [...document.querySelectorAll("button")]
+            .find((button) => button.textContent === "Enable link previews")
+            .click();
+          requestAnimationFrame(() =>
+            resolve(
+              document
+                .querySelector(
+                  '[data-link-previews] a[href="https://news.example.com/launch"]',
+                )
+                ?.getBoundingClientRect().height,
+            ),
+          );
+        }),
+    );
+    expect(redrawn).toBe(settled);
     await page.getByRole("button", { name: "Enable tracker plugin" }).click();
     await page.getByRole("button", { name: "Toggle theme" }).click();
     await expect(first.locator("[data-tracker-card]")).toBeVisible();

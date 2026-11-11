@@ -86,14 +86,23 @@ describe("createLoader", () => {
         headers: { "Content-Type": "image/png" },
         body: new Uint8Array([1]),
       }));
+      vi.stubGlobal(
+        "Image",
+        class {
+          src = "";
+          naturalWidth = 2;
+          naturalHeight = 1;
+          decode = async () => {};
+        },
+      );
       const loader = createLoader({ readPage: vi.fn(), requestBytes });
       const shown = loader.image("https://img.example.com/0.png");
       const others = Array.from({ length: 61 }, (_, i) =>
         loader.image(`https://img.example.com/${i + 1}.png`),
       );
       for (const lease of others) lease.release();
-      const src = await shown.src;
-      await Promise.all(others.map((lease) => lease.src));
+      const src = (await shown.picture)?.src;
+      await Promise.all(others.map((lease) => lease.picture));
       await Promise.resolve();
       expect(src).toBe("blob:test/0");
       expect(revoke).not.toHaveBeenCalledWith(src);
@@ -106,6 +115,7 @@ describe("createLoader", () => {
       await Promise.resolve();
       expect(revoke).toHaveBeenCalledWith("blob:test/61");
     } finally {
+      vi.unstubAllGlobals();
       create.mockRestore();
       revoke.mockRestore();
     }

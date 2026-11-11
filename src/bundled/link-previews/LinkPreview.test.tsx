@@ -10,7 +10,8 @@ const loader = (page: Page | null): Loader =>
   ({
     available: true,
     page: vi.fn(async () => page),
-    image: vi.fn(() => ({ src: Promise.resolve(null), release: vi.fn() })),
+    ready: vi.fn(() => undefined),
+    image: vi.fn(() => ({ picture: Promise.resolve(null), release: vi.fn() })),
     stop: vi.fn(),
   }) as unknown as Loader;
 
@@ -49,4 +50,33 @@ it("renders nothing when the page has no preview", async () => {
   );
   await vi.waitFor(() => expect(empty.page).toHaveBeenCalled());
   expect(container.innerHTML).toBe("");
+});
+
+it("draws a card it has already shown at its final size on the first frame", () => {
+  const page = {
+    url: "https://github.com/block/buzz-app/pull/1",
+    title: "A pull request",
+    image: "https://opengraph.githubassets.com/a.png",
+  };
+  const seen = {
+    ...loader(page),
+    ready: vi.fn(() => ({
+      page,
+      picture: { src: "blob:test/a", width: 1200, height: 600 },
+    })),
+  } as unknown as Loader;
+  render(
+    <LinkPreview
+      url={page.url}
+      messageId="m"
+      open={() => true}
+      loader={seen}
+    />,
+  );
+  const card = screen.getByRole("link", { name: /A pull request/ });
+  expect(card.hasAttribute("data-wide")).toBe(true);
+  const image = card.querySelector("img");
+  expect(image?.getAttribute("src")).toBe("blob:test/a");
+  expect(image?.getAttribute("width")).toBe("1200");
+  expect(image?.getAttribute("height")).toBe("600");
 });

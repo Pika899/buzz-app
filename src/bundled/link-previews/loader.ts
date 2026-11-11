@@ -23,10 +23,15 @@ const IMAGE_TYPES = new Set([
   "image/avif",
 ]);
 
+/** A decoded image and its size, so a card can lay out before it paints. */
+export type Picture = Readonly<{ src: string; width: number; height: number }>;
+/** What a card draws: its page and, when the page names one, its picture. */
+export type Preview = Readonly<{ page: Page; picture?: Picture | null }>;
+
 type Reader = Pick<Host, "readPage" | "requestBytes">;
-type Held = { src: Promise<string | null>; users: number; kept: boolean };
+type Held = { picture: Promise<Picture | null>; users: number; kept: boolean };
 export type ImageLease = Readonly<{
-  src: Promise<string | null>;
+  picture: Promise<Picture | null>;
   release(): void;
 }>;
 
@@ -39,6 +44,9 @@ export function createLoader(host: Reader | undefined) {
   const requestBytes = host?.requestBytes?.bind(host);
   const pages = new Map<string, Promise<Page | null>>();
   const images = new Map<string, Held>();
+  const settled = new WeakMap<Promise<unknown>, unknown>();
+  const known = <T>(pending: Promise<T> | undefined) =>
+    pending && settled.has(pending) ? (settled.get(pending) as T) : undefined;
   const waiting: (() => void)[] = [];
   let active = 0;
   let stopped = false;
@@ -107,6 +115,7 @@ export function createLoader(host: Reader | undefined) {
     const pending = load().catch(() => null);
     cache.set(key, pending);
     void pending.then((value) => {
+      settled.set(pending, value);
       if (value === null && cache.get(key) === pending) cache.delete(key);
     });
     for (const old of cache.keys()) {
@@ -117,7 +126,9 @@ export function createLoader(host: Reader | undefined) {
   }
 
   const revoke = (held: Held) =>
-    void held.src.then((src) => src && URL.revokeObjectURL(src));
+    void held.picture.then(
+      (picture) => picture && URL.revokeObjectURL(picture.src),
+    );
   const revokeIfUnused = (held: Held) => {
     if (!held.kept && held.users === 0) revoke(held);
   };
@@ -150,11 +161,19 @@ export function createLoader(host: Reader | undefined) {
         stopped
       )
         return null;
-      return {
-        value: URL.createObjectURL(
-          new Blob([reply.body as BlobPart], { type }),
-        ),
-      };
+      const src = URL.createObjectURL(
+        new Blob([reply.body as BlobPart], { type }),
+      );
+      const image = new Image();
+      image.src = src;
+      try {
+        await image.decode();
+      } catch {
+        URL.revokeObjectURL(src);
+        return null;
+      }
+      const { naturalWidth: width, naturalHeight: height } = image;
+      return { value: { src, width, height } };
     }).catch(() => null);
 
   return {
@@ -172,22 +191,32 @@ export function createLoader(host: Reader | undefined) {
         }),
       );
     },
-    /** A lease on the image's `blob:` URL. The cache keeps at most
+    /** The preview a card has already drawn, if it is settled, so a card
+     * that scrolls back into view draws at its final size on its first frame. */
+    ready(url: string): Preview | undefined {
+      const page = known(pages.get(url));
+      if (!page) return undefined;
+      if (!page.image) return { page };
+      const picture = known(images.get(page.image)?.picture);
+      return picture === undefined ? undefined : { page, picture };
+    },
+    /** A lease on the image's decoded `blob:` URL. The cache keeps at most
      * `KEEP_IMAGES` for reuse, but a URL is revoked only once it has left the
      * cache and every lease on it is released. */
     image(url: string): ImageLease {
       if (!requestBytes || stopped)
-        return { src: Promise.resolve(null), release() {} };
+        return { picture: Promise.resolve(null), release() {} };
       let held = images.get(url);
       if (held) {
         images.delete(url);
         images.set(url, held);
       } else {
-        const entry: Held = { src: loadImage(url), users: 0, kept: true };
+        const entry: Held = { picture: loadImage(url), users: 0, kept: true };
         held = entry;
         images.set(url, entry);
-        void entry.src.then((src) => {
-          if (src === null && images.get(url) === entry) {
+        void entry.picture.then((picture) => {
+          settled.set(entry.picture, picture);
+          if (picture === null && images.get(url) === entry) {
             images.delete(url);
             entry.kept = false;
           }
@@ -203,7 +232,7 @@ export function createLoader(host: Reader | undefined) {
       leased.users++;
       let released = false;
       return {
-        src: leased.src,
+        picture: leased.picture,
         release() {
           if (released) return;
           released = true;

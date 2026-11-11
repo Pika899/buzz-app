@@ -60,11 +60,15 @@ async function png(width: number, height: number) {
   const blob = await canvas.convertToBlob({ type: "image/png" });
   return new Uint8Array(await blob.arrayBuffer());
 }
-const requestBytes = async () => ({
-  status: 200,
-  headers: { "content-type": "image/png" },
-  body: await png(1200, 630),
-});
+// Images arrive after their pages, as they do over the network.
+const requestBytes = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return {
+    status: 200,
+    headers: { "content-type": "image/png" },
+    body: await png(1200, 630),
+  };
+};
 const asked: string[] = [];
 const loader = createLoader({
   readPage: (url, options) => {

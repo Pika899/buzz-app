@@ -1,48 +1,32 @@
 import { useEffect, useState } from "react";
 import type { LinkPreviewProps } from "../../features/conversation/contracts";
-import type { Loader, Page } from "./loader";
+import type { Loader, Preview } from "./loader";
 import { domainOf } from "./safety";
 import styles from "./LinkPreview.module.css";
 
-function Media({
-  loader,
-  image,
-  alt,
-  onWide,
-}: {
-  loader: Loader;
-  image: string;
-  alt: string;
-  onWide(wide: boolean): void;
-}) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [broken, setBroken] = useState(false);
+/** The card's page and picture once both settle, so it draws once at its final
+ * size; a card that scrolls back into view starts from the loader's copy. */
+function usePreview(loader: Loader, url: string) {
+  const [preview, setPreview] = useState(() => loader.ready(url));
   useEffect(() => {
     let live = true;
-    setSrc(null);
-    setBroken(false);
-    const lease = loader.image(image);
-    void lease.src.then((blob) => live && setSrc(blob));
+    let release = () => {};
+    setPreview(loader.ready(url));
+    void loader.page(url).then((page) => {
+      if (!live || !page) return;
+      if (!page.image) return setPreview({ page });
+      const lease = loader.image(page.image);
+      release = lease.release;
+      void lease.picture.then(
+        (picture) => live && setPreview({ page, picture }),
+      );
+    });
     return () => {
       live = false;
-      lease.release();
+      release();
     };
-  }, [loader, image]);
-  if (!src || broken) return null;
-  return (
-    <span className={styles.media}>
-      <img
-        src={src}
-        alt={alt}
-        decoding="async"
-        onLoad={(event) => {
-          const { naturalWidth, naturalHeight } = event.currentTarget;
-          onWide(naturalWidth > naturalHeight * 1.3);
-        }}
-        onError={() => setBroken(true)}
-      />
-    </span>
-  );
+  }, [loader, url]);
+  return preview;
 }
 
 export function LinkPreview({
@@ -50,18 +34,9 @@ export function LinkPreview({
   open,
   loader,
 }: LinkPreviewProps & { loader: Loader }) {
-  const [page, setPage] = useState<Page | null>(null);
-  const [wide, setWide] = useState(false);
-  useEffect(() => {
-    let live = true;
-    setPage(null);
-    setWide(false);
-    void loader.page(url).then((found) => live && setPage(found));
-    return () => {
-      live = false;
-    };
-  }, [loader, url]);
-  if (!page) return null;
+  const preview: Preview | undefined = usePreview(loader, url);
+  if (!preview) return null;
+  const { page, picture } = preview;
   const domain = domainOf(url);
   const site =
     page.siteName && page.siteName.toLowerCase() !== domain.toLowerCase()
@@ -71,19 +46,21 @@ export function LinkPreview({
     <a
       className={styles.card}
       href={url}
-      data-wide={wide || undefined}
+      data-wide={(picture && picture.width > picture.height * 1.3) || undefined}
       onClick={(event) => {
         event.preventDefault();
         open();
       }}
     >
-      {page.image && (
-        <Media
-          loader={loader}
-          image={page.image}
-          alt={page.imageAlt ?? ""}
-          onWide={setWide}
-        />
+      {picture && (
+        <span className={styles.media}>
+          <img
+            src={picture.src}
+            alt={page.imageAlt ?? ""}
+            width={picture.width}
+            height={picture.height}
+          />
+        </span>
       )}
       <span className={styles.body}>
         <span className={styles.site}>{site}</span>

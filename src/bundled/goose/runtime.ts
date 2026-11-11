@@ -385,6 +385,8 @@ export class GooseRuntime {
     superseded,
     interruptible,
     named,
+    session,
+    sessionContext,
   }: Delivery) {
     const settings = config(raw);
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
@@ -500,23 +502,31 @@ export class GooseRuntime {
               ? undefined
               : (threadReference(event)?.rootId ?? event.id);
           notes = agent.notes?.(channel, noteRoot) ?? [];
-          const text = this.review(
-            entry,
-            wait ? (await prompt(false, key)).text : prepared,
-            notes,
-          );
+          const text = [
+            sessionContext,
+            this.review(
+              entry,
+              wait ? (await prompt(false, key)).text : prepared,
+              notes,
+            ),
+          ]
+            .filter(Boolean)
+            .join("\n\n");
           if (interrupted || this.agents.get(agent.key) !== entry) {
             delivered = Promise.resolve({ ok: true, undelivered: true });
             return;
           }
-          entry.contexts.set(
-            key,
-            topLevel
+          entry.contexts.set(key, {
+            ...(session ? { session } : {}),
+            ...(topLevel
               ? { channel, ...(solo ? { topLevel } : {}) }
               : key === channel
                 ? { channel }
-                : { channel, root: threadReference(event)?.rootId ?? event.id },
-          );
+                : {
+                    channel,
+                    root: threadReference(event)?.rootId ?? event.id,
+                  }),
+          });
           delivered = entry.sessions.deliver(key, text, shown, {
             ...(wake
               ? {
@@ -527,13 +537,18 @@ export class GooseRuntime {
                       (await prompt(fresh, key)).text,
                       notes,
                     );
-                    return text;
+                    return [sessionContext, text].filter(Boolean).join("\n\n");
                   },
                 }
               : {}),
             steer: steerPrompt(text),
             fresh: async () =>
-              this.review(entry, (await prompt(true, key)).text, notes),
+              [
+                sessionContext,
+                this.review(entry, (await prompt(true, key)).text, notes),
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
             title: sessionTitle(entry.name, place, key.split("/")[1]),
             // A Solo chat takes the name goose gives its first session.
             ...(solo && named ? { named } : {}),

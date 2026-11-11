@@ -16,6 +16,7 @@ export const claudeRun = (
 ): Pick<
   AgentType<Config>,
   | "models"
+  | "sessionAdmission"
   | "sessionControls"
   | "run"
   | "runOnce"
@@ -24,6 +25,7 @@ export const claudeRun = (
   | "resumes"
   | "readFile"
 > => ({
+  sessionAdmission: true,
   models: (agent) => runtime.models(agent.key, agent.config),
   sessionControls: {
     scope: (agent) => config(agent.config).scope,

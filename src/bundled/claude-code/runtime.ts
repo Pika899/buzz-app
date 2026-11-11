@@ -878,6 +878,8 @@ export class ClaudeRuntime {
       superseded,
       interruptible,
       named,
+      session,
+      sessionContext,
     } = delivery;
     const settings = this.resolveConfig(
       raw,
@@ -1013,17 +1015,22 @@ export class ClaudeRuntime {
               ? undefined
               : (threadReference(event)?.rootId ?? event.id);
           const notes = agent.notes?.(channel, noteRoot) ?? [];
-          const text = this.review(entry, prepared, notes);
+          const text = [sessionContext, this.review(entry, prepared, notes)]
+            .filter(Boolean)
+            .join("\n\n");
           // A conversation's tools default to its thread; a session shared by
           // several threads is told which to reply in instead.
-          entry.contexts.set(
-            key,
-            topLevel
+          entry.contexts.set(key, {
+            ...(session ? { session } : {}),
+            ...(topLevel
               ? { channel, ...(solo ? { topLevel } : {}) }
               : key === channel
                 ? { channel }
-                : { channel, root: threadReference(event)?.rootId ?? event.id },
-          );
+                : {
+                    channel,
+                    root: threadReference(event)?.rootId ?? event.id,
+                  }),
+          });
           delivered = entry.sessions.deliver(key, text, event.created_at, {
             current: () => !interrupted && (!current || current()),
             ...(wake
@@ -1034,13 +1041,18 @@ export class ClaudeRuntime {
                       (await prompt(fresh)).text,
                       notes,
                     );
-                    return text;
+                    return [sessionContext, text].filter(Boolean).join("\n\n");
                   },
                 }
               : {}),
             steer: steerPrompt(text),
             fresh: async () =>
-              this.review(entry, (await prompt(true)).text, notes),
+              [
+                sessionContext,
+                this.review(entry, (await prompt(true)).text, notes),
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
             ...(contextRoot ? { contextRoot } : {}),
             activityScope: topLevel
               ? channel

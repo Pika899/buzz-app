@@ -1,4 +1,10 @@
 import { followUpQueue } from "../messages/follow-up-queue";
+import {
+  createSessionAdmissions,
+  type AgentSessionRouter,
+  type AgentSessionAssociation,
+} from "./session-admission";
+import { fromOwner, workflowOf } from "./owner-attestation";
 import type {} from "../navigation/service";
 import {
   createAgentExecutions,
@@ -694,6 +700,8 @@ export type StandaloneTurn<Config = unknown> = Readonly<{
 export type TurnResult = Readonly<{ ok: boolean; error?: string }>;
 export type Delivery<Config = unknown> = Readonly<{
   trigger: Trigger;
+  session?: AgentSessionAssociation;
+  sessionContext?: string;
   /** The live route's channel; absent when the wire scope was ambiguous. */
   channelId?: string;
   agent: AgentHandle;
@@ -840,6 +848,8 @@ export type AgentVoiceConnection = Readonly<{
 }>;
 
 export type AgentType<Config = unknown> = {
+  /** Carries Delivery.session into tool context and sessionContext into the prompt. */
+  sessionAdmission?: true;
   /** Huddles supplies a running agent owned by the current viewer.
    * Full-duplex voice on the existing room conversation; abort closes the pipe. */
   voice?(seat: AgentVoiceSeat<Config>): Promise<AgentVoiceConnection>;
@@ -1286,6 +1296,7 @@ export type NewAgent = Readonly<{
   config?: unknown;
 }>;
 export type Agents = {
+  registerSessionRouter(router: AgentSessionRouter): void;
   registerExecution(provider: AgentExecutionProvider): void;
   /** Select the adapter while the agent is idle. This is write-once. */
   bindExecution(
@@ -1838,6 +1849,10 @@ const wssOf = (origin: string) =>
   relayOrigin(origin).replace(/^https:/, "wss:");
 
 export class AgentsService extends Service implements Agents {
+  private readonly sessionAdmissions;
+  registerSessionRouter(router: AgentSessionRouter) {
+    this.sessionAdmissions.register(this.ctx, router);
+  }
   private readonly executions;
   private async checkExecution(key: AgentKey, type: string) {
     if (!(await this.executions.inspect(key))) return;
@@ -2058,6 +2073,10 @@ export class AgentsService extends Service implements Agents {
     private readonly deviceSettings?: DeviceSettings,
   ) {
     super(ctx, "agents");
+    this.sessionAdmissions = createSessionAdmissions(
+      ctx,
+      executionStorage(storage),
+    );
     this.executions = createAgentExecutions(ctx, executionStorage(storage));
     this.contributions = createContributions<HostedAgentType>(ctx);
     this.hookContributions = createAgentHooks(ctx);
@@ -2149,6 +2168,67 @@ export class AgentsService extends Service implements Agents {
     /** The catch-up progress this program last read or saved. */
     let savedProgress: Checkpoints = {};
     this.runners = new AgentRunners({
+      prepareSession: async (agent, type, trigger, channelId, signal) => {
+        if (
+          !this.sessionAdmissions.active() ||
+          !type.sessionAdmission ||
+          !type.sessionControls ||
+          (trigger.type !== "mention" &&
+            trigger.type !== "plugin" &&
+            trigger.type !== "attention")
+        )
+          return;
+        const event = trigger.type === "mention" ? trigger.event : undefined;
+        const channel =
+          channelId ??
+          (trigger.type !== "mention" ? trigger.channel : undefined);
+        if (!channel) return;
+        if (
+          event &&
+          !(await fromOwner(
+            event,
+            agent.owner,
+            workflowOf(
+              ownerReads(this.relay(agent.key), agent.pubkey),
+              agent.pubkey,
+            ),
+          ))
+        )
+          return;
+        const summary = this.channelOf(agent, { tags: [["h", channel]] });
+        const whole =
+          type.sessionControls.scope(agent) === "channel" ||
+          summary?.channelType === "dm" ||
+          summary?.channelType === "solo" ||
+          (trigger.type !== "mention" && trigger.topLevel === true);
+        const root = whole
+          ? undefined
+          : event
+            ? (threadReference(event)?.rootId ?? event.id)
+            : trigger.type !== "mention"
+              ? trigger.root
+              : undefined;
+        const sourceRoot = event
+          ? (threadReference(event)?.rootId ?? event.id)
+          : trigger.type !== "mention"
+            ? trigger.root
+            : undefined;
+        return this.sessionAdmissions.prepare({
+          agent: agent.key,
+          owner: agent.owner,
+          harness: agent.type,
+          source: {
+            channelId: channel,
+            ...(sourceRoot ? { root: sourceRoot } : {}),
+          },
+          conversation: { channelId: channel, ...(root ? { root } : {}) },
+          invocationId:
+            event?.id ?? (trigger.type !== "mention" ? trigger.id : ""),
+          ...(event ? { event } : {}),
+          resumed: trigger.type === "mention" && !!trigger.resumed,
+          signal,
+        });
+      },
       // Only the copy that runs an agent keeps its watched channels live.
       ownershipChanged: () => {
         this.attend(this.state.running);
@@ -4529,7 +4609,22 @@ export class AgentsService extends Service implements Agents {
       const current = shown();
       if (current?.type !== agent.type || !this.types().includes(type))
         throw new Error("The agent's harness changed. Try again.");
-      await type.sessionControls?.run(current, place, action);
+      const run = async () => {
+        await type.sessionControls?.run(current, place, action);
+      };
+      if (action !== "new" || !type.sessionAdmission) return run();
+      if (this.sessionState(key, place) !== "idle")
+        throw new Error("Wait for the active turn to finish first.");
+      const whole = type.sessionControls?.scope(current) === "channel";
+      await this.sessionAdmissions.reset(
+        key,
+        current.type,
+        {
+          channelId: place.channelId,
+          ...(!whole && place.root ? { root: place.root } : {}),
+        },
+        run,
+      );
     });
   }
 

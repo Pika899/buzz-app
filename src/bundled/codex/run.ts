@@ -20,6 +20,7 @@ export const codexRun = (
   AgentType<Config>,
   | "models"
   | "retire"
+  | "sessionAdmission"
   | "sessionControls"
   | "run"
   | "runOnce"
@@ -28,6 +29,7 @@ export const codexRun = (
   | "resumes"
   | "readFile"
 > => ({
+  sessionAdmission: true,
   models: (agent) => runtime.preview(agent),
   retire: (agent) => runtime.retire(agent),
   sessionControls: {

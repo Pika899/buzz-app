@@ -529,6 +529,8 @@ export class PiRuntime {
     acknowledged,
     superseded,
     interruptible,
+    session,
+    sessionContext,
   }: Delivery) {
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
     if (
@@ -625,11 +627,14 @@ export class PiRuntime {
         );
       // A conversation's tools default to its thread; a conversation shared
       // by several threads is told which to reply in instead.
-      const context: Context = topLevel
-        ? { channel, ...(solo ? { topLevel } : {}) }
-        : key === channel
-          ? { channel }
-          : { channel, root };
+      const context: Context = {
+        ...(session ? { session } : {}),
+        ...(topLevel
+          ? { channel, ...(solo ? { topLevel } : {}) }
+          : key === channel
+            ? { channel }
+            : { channel, root }),
+      };
       // Known before Pi has it, as it can say it joined a run first.
       entry.receipts.set(request, {
         key,
@@ -650,7 +655,9 @@ export class PiRuntime {
         ...(superseded ? { superseded } : {}),
       });
       const picked = await this.turnOf(entry, agent.key, model, effort);
-      const text = await prompt();
+      const text = [sessionContext, await prompt()]
+        .filter(Boolean)
+        .join("\n\n");
       this.live(entry, agent.key);
       if (interrupted || (wake && current && !current())) return;
       submitted = await this.deliver(

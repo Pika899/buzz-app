@@ -32,6 +32,42 @@ migration runs. Browser moves write the destination before removing the source
 and resume identical interrupted copies; differing destinations are left intact
 and reported as migration errors.
 
+## Plugin session associations
+
+A plugin can use `ctx.agents.registerSessionRouter` to attach local data to a
+native agent session before execution. The argument type is
+`Parameters<Agents["registerSessionRouter"]>[0]` from `@buzz/author`.
+The host checks the request's authority and keeps the signed message and its
+attachments. Replies use the source conversation.
+
+`ready()` opens only the plugin's local keyed storage. `matches()` selects the
+sources the plugin manages. Exactly one router can match a source. Its
+`prepare()` receives the agent, owner, harness, source, invocation ID, logical
+`sessionKey`, `intent`, `adopted`, `resumed`, saved association and abort signal.
+An owner message supplies `event`. A trusted wake has no signed event.
+Returning `undefined` leaves an unassociated run unchanged.
+
+The result supplies JSON `association` and optional text `context`. The host
+saves the association before execution. The association stays fixed for that
+logical lifetime. `Delivery.session`, `LocalWork.session` and tool `Context.session`
+carry `{sessionKey, router, association}`. Tool arguments and prompt text cannot
+set this value. The context stays pending until the harness acknowledges a
+request. Plugins finish relay publication and sidebar updates separately.
+
+The first association adopts the source lifetime with `intent: "existing"` and
+`adopted: true`. This does not prove whether the harness has a saved session.
+**New** changes the logical key and uses `intent: "new"`. Follow-ups, retries,
+restore, reconnect and Compact keep the key. A saved invocation keeps its key
+after New. A request from that retired lifetime cannot start in the current
+session. An incomplete reset blocks admission until the owner retries New.
+The host keeps its existing execution claims. These local records do not add a
+cross-device execution guarantee.
+
+A native type opts in with `sessionAdmission: true`. It must carry
+`Delivery.session` into its tool context and `Delivery.sessionContext` into its
+prompt. Claude, Codex, goose and Pi implement this contract. With no router and
+no saved association, the extension adds no execution or publication work.
+
 ## Creating and changing agents from a conversation
 
 The shared tools offer `agent_types` to list installed local runtimes and

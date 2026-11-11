@@ -107,6 +107,8 @@ type Request = {
   toolRoot?: string;
   /** The agent's team sections, if it is on a team. */
   team: string;
+  session?: Delivery["session"];
+  sessionContext?: string;
   /** The Solo chat's workspace Canvas section, if it has one. */
   project?: string;
   /** The model and effort the owner picked for this turn. */
@@ -265,6 +267,7 @@ function noteOf(request: Request) {
       request.conversation.root,
     ) ?? [];
   const notes = [
+    request.sessionContext,
     request.resumed ? RESUMED_PROMPT : undefined,
     ...request.notes,
     turnNote(request.agent),
@@ -1691,6 +1694,10 @@ export class CodexRuntime {
         ...(topLevel && !solo && !huddle ? { threadReplies: true } : {}),
       },
       team: delivery.team ?? "",
+      ...(delivery.session ? { session: delivery.session } : {}),
+      ...(delivery.sessionContext
+        ? { sessionContext: delivery.sessionContext }
+        : {}),
       ...(project ? { project: `${project}\n` } : {}),
       answered,
       failActivity,
@@ -2256,6 +2263,7 @@ export class CodexRuntime {
     // A watch or timer turn has no default destination.
     const context: Context = request
       ? {
+          ...(request.session ? { session: request.session } : {}),
           channel: request.conversation.channelId,
           ...(request.toolRoot ? { root: request.toolRoot } : {}),
           ...(request.toolRoot && !request.conversation.root

@@ -151,6 +151,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         component: ActivityTab,
       },
     ],
+    sessionAdmission: true,
     sessionControls: {
       scope: (agent) => config(agent.config).scope,
       state: (agent, place) => runtime.sessionState(agent, place),

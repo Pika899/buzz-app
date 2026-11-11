@@ -1,4 +1,5 @@
 import { interestPaused } from "./attention";
+import type { AgentSessionAssociation } from "./session-admission";
 // The agent runner: one queue per agent, its rate limit, mention and watch
 // matching, due timers, the run deadline and the claim that lets exactly one
 // host run each agent. It knows nothing of where it runs: everything it needs
@@ -491,6 +492,21 @@ export type RunnerHost = {
   team(key: AgentKey): string;
   /** What its next run starts with, from this device's storage only. */
   start(agent: Agent): Start<unknown> | Promise<Start<unknown>>;
+  prepareSession?(
+    agent: Agent,
+    type: RegisteredAgentType,
+    trigger: Trigger,
+    channelId: string | undefined,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{
+        session: AgentSessionAssociation;
+        context?: string;
+        release(): void;
+        acknowledged(): void;
+      }>
+    | undefined
+  >;
   protection?(agent: Agent): AgentHandle["protection"];
   agentTypes(): ReturnType<NonNullable<AgentHandle["agentTypes"]>>;
   createAgent(
@@ -2686,15 +2702,31 @@ export class AgentRunners {
       woke();
       return run(delivery);
     };
+    let releaseSession: (() => void) | undefined;
     const completion = Promise.resolve().then(async () => {
       this.assertProtected(agent, type, handle);
       const pick = await pickFor(job.trigger, agent, type);
       const start = await this.host.start(agent);
       if (!start.ok) throw new Error(start.reason);
       const team = this.host.team(agent.key);
+      const admitted = await this.host.prepareSession?.(
+        agent,
+        type,
+        job.trigger,
+        job.channelId,
+        signal,
+      );
+      releaseSession = admitted?.release;
+      if (admitted) job.work?.associate(admitted.session);
       signal.throwIfAborted();
       const delivery = Object.freeze({
         trigger: job.trigger,
+        ...(admitted
+          ? {
+              session: admitted.session,
+              ...(admitted.context ? { sessionContext: admitted.context } : {}),
+            }
+          : {}),
         ...(job.channelId ? { channelId: job.channelId } : {}),
         agent: handle,
         config: start.config,
@@ -2707,13 +2739,19 @@ export class AgentRunners {
         ...(job.work
           ? {
               ignored: () => job.work?.remove(),
-              acknowledged: () => job.work?.started(),
+              acknowledged: () => {
+                job.work?.started();
+                admitted?.acknowledged();
+              },
               superseded: () => job.work?.supersede(),
               interruptible: (stop: () => Promise<void>) =>
                 job.work?.interruptible(stop),
               step: (tool: string, target?: string) =>
                 job.work?.step(tool, target),
             }
+          : {}),
+        ...(!job.work && admitted
+          ? { acknowledged: admitted.acknowledged }
           : {}),
         ...(named ? { named } : {}),
         current: () =>
@@ -2763,6 +2801,10 @@ export class AgentRunners {
         ),
       );
     });
+    void completion.then(
+      () => releaseSession?.(),
+      () => releaseSession?.(),
+    );
     void working.settled
       .then(async () => {
         this.sourceJobs.delete(job);

@@ -5855,7 +5855,10 @@ it.each(["plugin", "attention"] as const)(
     );
     await f.runtime.run({
       ...delivery,
-      trigger: { ...delivery.trigger, type, topLevel: true },
+      trigger:
+        type === "attention"
+          ? { ...delivery.trigger, type: "attention", topLevel: true }
+          : { ...delivery.trigger, topLevel: true },
       prepareSession: async (placement) => ({
         conversation: placement.source.root
           ? placement.source

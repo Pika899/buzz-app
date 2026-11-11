@@ -1,9 +1,6 @@
 import { createContext, useContext } from "react";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
-import {
-  LayoutSidebarLeftCollapseIcon,
-  LayoutSidebarLeftExpandIcon,
-} from "../../shared/design-system/icons";
+import { MenuIcon } from "../../shared/design-system/icons";
 
 /** The collection host owns visibility; conversation headers only expose its control. */
 export const ConversationListVisibility = createContext<{
@@ -31,13 +28,7 @@ export function ConversationListToggle({
       title={label}
       aria-controls={list.controls}
       aria-expanded={list.open}
-      icon={
-        list.open ? (
-          <LayoutSidebarLeftCollapseIcon size={18} />
-        ) : (
-          <LayoutSidebarLeftExpandIcon size={18} />
-        )
-      }
+      icon={<MenuIcon size={18} />}
       onClick={(event) => {
         list.setOpen(!list.open, event.detail > 0);
         if (inList && list.open) {

@@ -565,6 +565,7 @@ revokes all of them, and a pairing unused for 30 days expires.
   reply preview floating above the composer without resizing the transcript. Release to focus the composer, or drag to
   select text and dismiss the provisional preview. Send to reply in its thread.
   This also works in Solo chats, Inbox conversation previews, Bestie, and conversation tabs.
+  Holding in the gutters outside the centered message list does not select a reply.
   Selecting or canceling a reply preserves your current draft. The preview follows
   message edits; if the target becomes unavailable, cancel it before sending.
   Press **Escape** to cancel even while still holding the message, or use

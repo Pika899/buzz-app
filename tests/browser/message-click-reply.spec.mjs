@@ -11,6 +11,62 @@ import { openThreadLink } from "./message-actions.mjs";
 
 test.use({ historyCounts: { alpha: 30, beta: 1 }, developmentReact: true });
 
+// Browser-only: the virtual row can extend beyond the centered reading column.
+test("reply holds ignore both gutters outside the message list", async ({
+  page,
+  app,
+}) => {
+  await page.goto(
+    `${app.origin}/#buzz=${encodeURIComponent(
+      JSON.stringify({
+        version: 1,
+        kind: "conversation",
+        channelId: "alpha",
+        scope: {
+          viewer: app.viewer,
+          communityOrigin: "https://primary.example",
+        },
+      }),
+    )}`,
+  );
+  const history = page.locator('[data-channel-timeline="alpha"]');
+  const last = app.histories.get("primary/alpha").at(-1);
+  const row = history.locator(`[data-message-id="${last.id}"]`);
+  const prose = row.locator("p").first();
+  await expect(prose).toBeInViewport();
+  await virtuaIdle(page, history);
+  const column = await row
+    .locator("[data-highlight-surface]")
+    .first()
+    .boundingBox();
+  const viewport = await history.boundingBox();
+  const text = await prose.boundingBox();
+  expect(column.x - viewport.x).toBeGreaterThan(20);
+  expect(viewport.x + viewport.width - column.x - column.width).toBeGreaterThan(
+    20,
+  );
+  await page.clock.install();
+  const cancel = page.getByRole("button", {
+    name: "Cancel reply target",
+    exact: true,
+  });
+  for (const x of [
+    (viewport.x + column.x) / 2,
+    (column.x + column.width + viewport.x + viewport.width) / 2,
+  ]) {
+    await page.mouse.move(x, text.y + text.height / 2);
+    await page.mouse.down();
+    await page.clock.runFor(150);
+    await page.mouse.up();
+    await expect(cancel).toHaveCount(0);
+  }
+  await prose.hover();
+  await page.mouse.down();
+  await page.clock.runFor(150);
+  await expect(cancel).toBeVisible();
+  await page.mouse.up();
+});
+
 // Browser-only: reply transitions must preserve real composer/scrollport geometry.
 // A DOM emulator cannot prove that the clicked message stays at its reading Y.
 test("holding to reply near the bottom preserves the reading position and Escape cancels", async ({

@@ -1089,12 +1089,12 @@ function MessageRowContent({
     );
   const message = (
     <div
-      {...replyHold}
       data-message-id={renderMessage ? undefined : row.id}
       data-huddle-row={row.huddle ? "" : undefined}
     >
       {day && <DayDivider createdAt={row.createdAt} />}
       <div
+        {...replyHold}
         ref={rowRef}
         className={styles.message}
         data-highlight-surface=""

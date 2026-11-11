@@ -4776,6 +4776,13 @@ it("replies after a 100ms hold, preserving short clicks, selection, links, and c
     const prose = screen.getByText("Hold this message");
     const down = (target = prose) =>
       fireEvent.pointerDown(target, { button: 0, clientX: 10, clientY: 10 });
+    // The full-width virtual row includes gutters outside the centered list.
+    const wrapper = prose.closest<HTMLElement>("[data-message-id]");
+    if (!wrapper) throw new Error("Message wrapper unavailable");
+    down(wrapper);
+    act(() => vi.advanceTimersByTime(100));
+    fireEvent.pointerUp(wrapper);
+    expect(reply).not.toHaveBeenCalled();
     fireEvent.click(prose);
     down();
     act(() => vi.advanceTimersByTime(99));

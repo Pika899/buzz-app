@@ -462,6 +462,9 @@ revokes all of them, and a pairing unused for 30 days expires.
   can take until the channel list next refreshes to return. If this connection
   can't start DMs, New message still shows the earlier messages but Send is
   disabled, and search opens a one-to-one DM without bringing it back.
+- **Links to messages in other channels** open in a companion thread tab when
+  the current workspace can show them. Your original conversation, scroll position,
+  and draft stay in place; closing the tab returns focus to the link.
 - **Message link previews** appear when you hover or focus a Buzz message link.
   When the message can't be shown, the card says why: the channel is private,
   gone or in another community; the message isn't available, and may have

@@ -581,6 +581,7 @@ function PreparedMessageMarkdown({
     return (
       <MessageLink
         url={url}
+        sourceChannelId={row.channelId}
         label={label}
         directoryLabel={channelLinkLabel(url, directory.channels)}
         registry={extensions?.links}

@@ -121,6 +121,58 @@ describe("createLoader", () => {
     }
   });
 
+  it("keeps an image a card is about to draw from the cache ahead of newer ones", async () => {
+    let made = 0;
+    const create = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation(() => `blob:test/${made++}`);
+    const revoke = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    vi.stubGlobal(
+      "Image",
+      class {
+        src = "";
+        naturalWidth = 2;
+        naturalHeight = 1;
+        decode = async () => {};
+      },
+    );
+    try {
+      const loader = createLoader({
+        readPage: vi.fn(async () => ({
+          status: 200,
+          preview: { title: "Post", image: "https://img.example.com/0.png" },
+        })),
+        requestBytes: vi.fn(async () => ({
+          status: 200,
+          headers: { "content-type": "image/png" },
+          body: new Uint8Array([1]),
+        })),
+      });
+      await loader.page("https://example.com/post");
+      const first = loader.image("https://img.example.com/0.png");
+      await first.picture;
+      first.release();
+      const others = Array.from({ length: 59 }, (_, i) =>
+        loader.image(`https://img.example.com/${i + 1}.png`),
+      );
+      await Promise.all(others.map((lease) => lease.picture));
+      expect(loader.ready("https://example.com/post")?.picture?.src).toBe(
+        "blob:test/0",
+      );
+      const newest = loader.image("https://img.example.com/60.png");
+      await newest.picture;
+      await Promise.resolve();
+      expect(revoke).not.toHaveBeenCalledWith("blob:test/0");
+      loader.stop();
+    } finally {
+      vi.unstubAllGlobals();
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
   it("draws a card whose image failed as text at once, and retries the image", async () => {
     const readPage = vi.fn(async () => ({
       status: 200,

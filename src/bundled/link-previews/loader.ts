@@ -128,6 +128,15 @@ export function createLoader(host: Reader | undefined) {
     return pending;
   }
 
+  /** Marks an image most recently used, so eviction takes it last. */
+  const touch = (url: string) => {
+    const held = images.get(url);
+    if (held) {
+      images.delete(url);
+      images.set(url, held);
+    }
+    return held;
+  };
   const revoke = (held: Held) =>
     void held.picture.then(
       (picture) => picture && URL.revokeObjectURL(picture.src),
@@ -195,14 +204,16 @@ export function createLoader(host: Reader | undefined) {
       );
     },
     /** The preview a card has already drawn, if it is settled, so a card
-     * that scrolls back into view draws at its final size on its first frame. */
+     * that scrolls back into view draws at its final size on its first frame.
+     * Its image counts as just used, so it outlasts the cache's other
+     * entries until the card's lease takes hold. */
     ready(url: string): Preview | undefined {
       const page = known(pages.get(url));
       if (!page) return undefined;
       if (!page.image) return { page };
       const picture = failed.has(page.image)
         ? null
-        : known(images.get(page.image)?.picture);
+        : known(touch(page.image)?.picture);
       return picture === undefined ? undefined : { page, picture };
     },
     /** A lease on the image's decoded `blob:` URL. The cache keeps at most
@@ -211,11 +222,8 @@ export function createLoader(host: Reader | undefined) {
     image(url: string): ImageLease {
       if (!requestBytes || stopped)
         return { picture: Promise.resolve(null), release() {} };
-      let held = images.get(url);
-      if (held) {
-        images.delete(url);
-        images.set(url, held);
-      } else {
+      let held = touch(url);
+      if (!held) {
         const entry: Held = { picture: loadImage(url), users: 0, kept: true };
         held = entry;
         images.set(url, entry);

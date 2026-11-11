@@ -416,7 +416,7 @@ it("retains contributed-sidebar width across leaving, remounting and its fallbac
     });
   });
   expect(await screen.findByRole("region", { name: "Team" })).toBeVisible();
-  const team = screen.getByRole("region", { name: "Team", exact: true });
+  const team = screen.getByRole("region", { name: "Team" });
   expect(
     within(team).getByRole("separator", { name: "Resize sidebar" })
       .previousElementSibling,

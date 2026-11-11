@@ -230,3 +230,44 @@ it("clears core memory once a read finds none, even with no connection", async (
   f.disconnect();
   await expect(f.cache.core(agent)).resolves.toBeNull();
 });
+
+it("gives a failed first read what was cached while it waited", async () => {
+  const f = setup();
+  let fail!: (error: Error) => void;
+  f.memoryListing.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject;
+    }),
+  );
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const start = f.cache.core(agent);
+  f.cache.wrote(agent, "core", "written");
+  await expect(f.cache.core(agent)).resolves.toBe("written");
+  fail(new Error("offline"));
+  await expect(start).resolves.toBe("written");
+});
+
+it("gives a read outlived by its connection what the new one cached", async () => {
+  const f = setup();
+  const first = held();
+  f.memoryListing.mockReturnValueOnce(first.promise);
+  const start = f.cache.core(agent);
+  f.reconnect(vi.fn(async () => listing("fresh")));
+  await expect(f.cache.core(agent)).resolves.toBe("fresh");
+  first.release(listing("stale"));
+  await expect(start).resolves.toBe("fresh");
+});
+
+it("falls back to the community it last answered from, cached or not", async () => {
+  const f = setup();
+  await f.cache.core(agent);
+  f.reconnect(
+    vi.fn(async () => listing("two")),
+    "wss://two.test",
+  );
+  await expect(f.cache.core(agent)).resolves.toBe("two");
+  f.reconnect(f.memoryListing, "wss://one.test");
+  await expect(f.cache.core(agent)).resolves.toBe("one");
+  f.disconnect();
+  await expect(f.cache.core(agent)).resolves.toBe("one");
+});

@@ -63,11 +63,8 @@ export class CoreMemoryCache {
     const timeout = AbortSignal.timeout(FIRST_READ_MS);
     try {
       const reads = this.reads(pubkey);
-      const scope = reads?.scope ?? this.scopes.get(pubkey);
-      const cached =
-        scope === undefined
-          ? undefined
-          : this.latest.get(this.key(scope, pubkey));
+      if (reads) this.scopes.set(pubkey, reads.scope);
+      const cached = this.cached(pubkey);
       if (cached !== undefined) return cached;
       if (!reads) throw new Error("Buzz is not connected");
       return await this.read(
@@ -78,7 +75,8 @@ export class CoreMemoryCache {
     } catch (error) {
       signal?.throwIfAborted();
       console.warn("Could not read the agent's core memory", error);
-      return undefined;
+      // Another read or write may have kept a copy while this one waited.
+      return this.cached(pubkey);
     }
   }
 
@@ -106,8 +104,9 @@ export class CoreMemoryCache {
   }
 
   /** Reads and keeps the `core` memory, unless a partial listing missed it or
-   * a later read or write started since. Undefined when the connection was
-   * replaced or the agent left it: a new one may read as someone else. */
+   * a later read or write started since. When the connection was replaced or
+   * the agent left it, only the copy kept for its current community: a new
+   * one may read as someone else. */
   private async read(reads: AgentReads, pubkey: string, signal: AbortSignal) {
     this.scopes.set(pubkey, reads.scope);
     const key = this.key(reads.scope, pubkey);
@@ -115,7 +114,8 @@ export class CoreMemoryCache {
     const memory = coreOf(
       await this.memoryReads.read(reads, pubkey, signal, "core"),
     );
-    if (this.reads(pubkey)?.connection !== reads.connection) return undefined;
+    if (this.reads(pubkey)?.connection !== reads.connection)
+      return this.cached(pubkey);
     if (this.writers.get(key) !== writer) {
       // A later write or read took over: answer with what it kept, if anything.
       const current = this.latest.get(key);
@@ -123,6 +123,15 @@ export class CoreMemoryCache {
     }
     if (memory !== undefined) this.latest.set(key, memory);
     return memory;
+  }
+
+  /** The copy kept for the agent's current community, or the one it last
+   * read while it is disconnected. */
+  private cached(pubkey: string) {
+    const scope = this.reads(pubkey)?.scope ?? this.scopes.get(pubkey);
+    return scope === undefined
+      ? undefined
+      : this.latest.get(this.key(scope, pubkey));
   }
 
   private claim(key: string) {

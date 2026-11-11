@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn inline_csp_hash_matches_html_newline_normalization() {
+    let expected =
+        base64::engine::general_purpose::STANDARD.encode(Sha256::digest("first\nsecond\nthird\n"));
+    for source in [
+        "first\nsecond\nthird\n",
+        "first\r\nsecond\r\nthird\r\n",
+        "first\rsecond\rthird\r",
+        "first\r\nsecond\rthird\n",
+    ] {
+        assert_eq!(inline_csp_hash(source), expected);
+    }
+    assert_ne!(inline_csp_hash("first\nsecond\nthird"), expected);
+}
+
 fn options(path: &str) -> OAuthRequest {
     OAuthRequest {
         authorization_url: "https://provider.example/authorize?client_id=buzz&scope=a%20b&scope=c"
@@ -197,7 +212,8 @@ fn assert_way_back(response: &str, return_link: bool) {
     } else {
         let script = include_str!("page.js");
         assert!(body.contains(&format!("<script>{script}</script>")));
-        let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(script));
+        let parsed_script = script.replace("\r\n", "\n").replace('\r', "\n");
+        let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(parsed_script));
         assert!(headers.contains(&format!("; script-src 'sha256-{hash}'\r\n")));
         assert!(body.contains("data-close-delay=\"3\""));
         assert!(body.contains("<span id=\"close-hint\">You can close this window.</span>"));
@@ -262,7 +278,8 @@ async fn real_listener_preserves_callback_parameters_and_closes_after_completion
             .split_once("</style>")
             .unwrap()
             .0;
-        let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(style));
+        let parsed_style = style.replace("\r\n", "\n").replace('\r', "\n");
+        let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(parsed_style));
         assert!(headers.contains(&format!("style-src 'sha256-{hash}'")));
         assert!(headers.contains("default-src 'none'"));
         assert!(headers.contains("img-src data:;"));
@@ -767,7 +784,8 @@ fn assert_federated_callback(response: &str, message: &str, return_link: bool) {
         .split_once("</style>")
         .unwrap()
         .0;
-    let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(style));
+    let parsed_style = style.replace("\r\n", "\n").replace('\r', "\n");
+    let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(parsed_style));
     assert!(headers.contains(&format!("style-src 'sha256-{hash}'")));
     assert!(headers.contains("default-src 'none'"));
     assert!(headers.contains("img-src data:;"));

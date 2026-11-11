@@ -21,6 +21,8 @@ export type PluginInfo = {
   iconPngRevision?: string | null;
   iconJpgRevision?: string | null;
 };
+export type PluginRelease = Pick<PluginInfo, "revision" | "publisher">;
+
 export type Catalog = {
   profile: string;
   location: string;
@@ -53,6 +55,10 @@ export type ManagedUrlEntry = {
 export type ManagedEntry = ManagedGitEntry | ManagedUrlEntry;
 export type ManagedPlugins =
   | { status: "invalid"; path: string; reason: string }
+  /** The build's packaged policy has not been fetched yet. */
+  | { status: "loading"; url: string }
+  /** The build's packaged policy could not be fetched, and there is no earlier copy. */
+  | { status: "unavailable"; url: string; reason: string }
   | {
       status: "ready";
       path: string;
@@ -95,7 +101,7 @@ export type ImportFile = { path: string } & (
 );
 export type PluginImports = {
   folder(): Promise<ImportPreview | null>;
-  checkFolder(id: string): Promise<string>;
+  checkFolder(id: string): Promise<PluginRelease>;
   previewFolder(id: string): Promise<ImportPreview | null>;
   files(source: string, files: ImportFile[]): Promise<ImportPreview | null>;
   /**

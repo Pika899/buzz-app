@@ -15,6 +15,7 @@ mod pairing;
 mod qr;
 #[cfg(unix)]
 mod quit_signal;
+mod sharing;
 use browser::{
     browser_action, browser_attach, browser_detach, browser_navigate, browser_set_bounds,
     browser_set_media_suspended, browser_status,
@@ -74,6 +75,7 @@ mod reshow;
 
 mod notifications;
 mod os_idle;
+mod packaged_plugins;
 mod plugin_url;
 mod repositories_folder;
 mod window_controls;
@@ -109,7 +111,7 @@ mod test_executable;
 use buzzodz_plugins::{
     imports::{
         check_saved_folder, prepare_folder, prepare_saved_folder, prepare_upload, FolderUpload,
-        PreparedImport, Preview,
+        PreparedImport, Preview, UpdateCheck,
     },
     Catalog, InstallationResult, Manager,
 };
@@ -129,8 +131,8 @@ use host_process::{
     plugin_host_process_tool_credential, plugin_host_process_write, HostProcesses,
 };
 use host_request::{
-    plugin_host_call_context, plugin_host_request, plugin_host_request_bytes, plugin_host_upload,
-    plugin_host_upload_bytes_once, HostCalls,
+    plugin_host_call_context, plugin_host_read_page, plugin_host_request,
+    plugin_host_request_bytes, plugin_host_upload, plugin_host_upload_bytes_once, HostCalls,
 };
 use notifications::{notification_show, Notifications};
 #[cfg(target_os = "macos")]
@@ -366,7 +368,7 @@ async fn plugin_import_folder<R: tauri::Runtime>(
 async fn plugin_update_check(
     manager: tauri::State<'_, PluginManager>,
     id: String,
-) -> Result<String, String> {
+) -> Result<UpdateCheck, String> {
     with_manager(manager, move |manager| check_saved_folder(&manager, &id)).await
 }
 #[tauri::command]
@@ -625,6 +627,16 @@ async fn plugin_catalog(
     })
     .await
 }
+/// Fetches the packaged plugin policy now, for a Retry in Settings, then reads the catalog.
+#[tauri::command]
+async fn plugin_managed_refresh(
+    manager: tauri::State<'_, PluginManager>,
+) -> Result<InstallationResult, String> {
+    if let Ok(m) = &manager.0 {
+        packaged_plugins::refresh(m).await;
+    }
+    plugin_catalog(manager).await
+}
 #[tauri::command]
 async fn plugin_change(
     manager: tauri::State<'_, PluginManager>,
@@ -703,6 +715,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pairing::pairing_deny,
         pairing::pairing_cancel,
         qr::qr_code,
+        sharing::share_image,
         identity_restore,
         identity_import,
         identity_legacy_available,
@@ -779,6 +792,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         plugin_import_install,
         plugin_import_discard,
         plugin_catalog,
+        plugin_managed_refresh,
         plugin_change,
         plugin_reload,
         plugin_module,
@@ -787,6 +801,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         plugin_host_call_context,
         plugin_host_request,
         plugin_host_request_bytes,
+        plugin_host_read_page,
         plugin_host_upload_bytes_once,
         plugin_host_save_bytes,
         plugin_host_delete_managed_file,
@@ -997,6 +1012,9 @@ pub fn run() {
                 }
             }
             tauri::async_runtime::spawn(host_command::load_login_shell_path());
+            if let Ok(manager) = &app.state::<PluginManager>().0 {
+                packaged_plugins::spawn(manager.clone());
+            }
             deep_links::setup(app.handle());
             mesh_compute::setup(app.handle());
             app.manage(relay::Spools::new(

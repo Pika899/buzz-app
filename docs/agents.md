@@ -76,6 +76,32 @@ same local bound and lifetime.
 Keys stay in native custody. Hosted-provider provisioning and standalone tool
 servers do not support these operations.
 
+## Message edits
+
+The shared MCP `edit` tool retains the latest live attachment set, including an
+empty set left by a previous edit. Both app-hosted and standalone agents resolve
+that state as the agent through the version-1 `effective_edit` primary lookup on
+`/query`; they verify the signed original/replacement and their target/channel.
+The exact filter uses kinds `[9,40002,40008,45001,45003]`.
+Deploy the relay support from
+[buzz#9226](https://github.com/block/buzz/pull/9226) before releasing this client.
+An old relay's array response, inaccessible target, invalid response or failed
+lookup aborts without publishing. All MCP agent edits stop working on a community
+whose relay lacks this lookup; upgrade each community before releasing the client.
+There is no original-attachment fallback. Observe MCP edit errors and the relay's
+`buzz_media_publication_access_total` denials during rollout. Rolling the client
+back restores the original-attachment resurrection bug.
+
+The tool waits until the second after the observed head before requesting a
+signature, reusing the bounded wait for notes/canvas. If that second is over five
+seconds ahead, it asks the caller to retry when the clock catches up.
+The MCP publisher stamps the current time, so its five-second wait bounds tool
+latency. The CLI supplies an explicit timestamp and tolerates a 60-second lead.
+Concurrent writers still use relay ordering; this is not compare-and-swap. The relay must
+authorize every carried file for the signing agent; an owner's access does not
+grant the agent private-media access, and denial never causes an automatic retry
+with files stripped.
+
 ## External app authorization
 
 The build flag `BUZZ_EXTERNAL_MCP_COMMUNITIES` lists the allowed community
@@ -473,10 +499,12 @@ anchor in place of the event (the thread's `e` tag, and a random id), and a
 woke the agent, that neither the owner nor anyone in the channel wrote it, and
 that its text is data. The anchor's id is never published: failure reports and
 typing go to the thread root, or the channel itself in a Solo chat, and a wake
-with no `root` outside a Solo chat is ignored. A wake is not saved for resume
-and shows no activity row or Stop. Pi, which continues the runs an app left,
-ends a wake's run instead, unless a mention or Attention wake left in the same
-conversation would end with it or stay queued behind it. Then the wake's run
+with no `root` outside a Solo chat is ignored. A wake is not saved for resume.
+It shows a local Work row with its status and a retry action after failure.
+Stop is available when the agent supports interruption. Pi, which continues
+the runs an app left, ends a wake's run instead, unless a mention or Attention
+wake left in the same conversation would end with it or stay queued behind it.
+Then the wake's run
 goes on, and only what it sends is posted. Pi still waits for the wake, so a
 run of its own that fails fails what is queued behind it too, which reports it.
 
@@ -786,6 +814,22 @@ grant access.
 Regression source: `features/agents/choices.test.ts`, plus the chooser, composer
 and Solo chat admission tests. They exercise shared selection and Solo chat admission,
 not native execution.
+
+## Creating a Solo chat in a personal workspace
+
+Locally hosted agent runs can call `solo_workspace_list` for the host-bound
+owner's personal workspace IDs and names in that community. Pass an exact ID as
+`workspace` to `channel_create` with `solo: true`, and name the owner explicitly
+in `members`. This files only that new confirmed Solo chat. It does not enroll
+members implicitly, copy default agents/Canvas, or change agent authorship.
+Unknown targets and missing owner membership fail before creation. A target
+removed later or a failed preference write leaves the created chat intact; the
+result preserves its ID. A known refusal before assignment says “created, not
+filed”; after assignment starts, failure says placement is unconfirmed and may
+have completed. Inspect or refresh the chat before using **Move to**; never
+create a duplicate. Omit `workspace` for unchanged creation.
+External/standalone tools, Nexus worker requests, and plugin agent handles do
+not gain this host-private capability or a general move operation.
 
 ## Exact channel-member mentions
 
@@ -1342,15 +1386,19 @@ tasks unknown.
 
 ### Activity updates in the conversation
 
-When no live activity bubble on the triggering message shows an agent, the live
-conversation indicator remains visible while it works, even when recorded
-activity is collapsed or expanded. While that bubble shows, it is the agent's
-working indicator and the conversation adds no second one; the conversation cue
-returns once recorded history owns the work. The indicator keeps dots beside
-current tool labels; reduced motion leaves the dots static. Activity text may
-shimmer too, but does not replace that persistent working cue.
-When local request evidence is available, old activity does not inherit the
-working/thinking state of a different request in the same thread.
+An agent's work has one working indicator. While a live activity bubble on the
+triggering message shows the agent, that bubble is its indicator. Once mounted
+recorded history presents the request's work, that history is its indicator:
+dots in the collapsed summary, or on the active update when expanded, beside the
+shimmering text. The conversation indicator adds no second one, but it stays
+visible for any request of that agent here that nothing mounted presents, and
+returns when that history unmounts or is closed, or once a newer message follows
+it. History that is mounted but scrolled out of view still counts, as the live
+bubble does. A bubble showing only a settled outcome, such as an error, does not
+count. Reduced motion leaves the dots static.
+When local work or a remote turn's triggering IDs identify the request, old
+activity does not inherit the working/thinking state of a different request in
+the same thread. Only work with no known request falls back to the thread.
 
 Agent-to-agent coordination messages remain in the conversation as collapsed,
 expandable history, including after completion, stopping, steering, or reload.
@@ -1360,14 +1408,19 @@ its messages in their original order; exact message links open the matching grou
 
 Live work is separate from this history. Explicit immediate reply IDs and activity
 message IDs select request lifecycle evidence; a nearby human message or shared
-thread root is not proof of a turn. Finishing a request retires its live treatment,
+thread root is not proof of a turn. Thread replies flatten to the thread root, so an
+update binds first to the request whose local run published it, then to a signed
+`["buzz:request", <id>]` tag naming a loaded human request in the same channel
+and thread (or that thread's root), at any reply level. The `send` and `reply_in_subthread` tools add
+that tag from their `request` argument, the turn's triggering message. That
+request, not the reply link, then decides which live work the update shows.
+Untagged or unverifiable updates keep their reply link. Finishing a request retires its live treatment,
 not its messages. When lifecycle evidence is missing, a related public reply can
 retire the old live treatment without claiming that execution completed. Current
 work continues to appear in the conversation indicator.
 
 A public reply alone does not replace the request's live indicator. Mounted
-update history can own the current step and request controls while the live
-conversation indicator remains available. When public replies
+update history can own the current step, its working dots and request controls. When public replies
 split one request's updates into several runs, only the latest run for each agent
 owns its live shimmer and Stop control; earlier runs remain readable history.
 Other agents and requests retain their own live presentation.
@@ -1511,8 +1564,13 @@ and also the host's saved Buzz library. The development broker's
 directory, leaving out an agent that is only in communities it was added to, and
 caps it at 8 MiB / 2000 records; the native host reads it and
 `agents/memberships.json` through their owner, `AppAgents`. A missing store is an empty local
-inventory; neither host falls back to retired stores. Deleted identities are
-omitted and identities configured in multiple communities are joined by public key.
+inventory; neither host falls back to retired stores. Both host reads filter saved
+rows by the signed-in owner and selected community before deduplicating public keys,
+so another account's or community's agents never become chooser candidates or supply
+that community's artwork. Deleted and joining identities are omitted. The native
+IPC requires a community and derives the owner from the native identity; the broker
+uses its captured identity and registered request destination, not caller-supplied
+owner data. Concurrent broker reads are shared only within the same community.
 The host read is read-only: it writes no configuration, migrates no identities,
 retrieves no credentials and manages no processes. Only identity
 public key/name and optional avatar artwork leave the host. Optional artwork

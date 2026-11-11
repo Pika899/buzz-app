@@ -135,7 +135,9 @@ Windows or Linux beyond what that existing link does.
   windows. Responses use `no-store` and `no-referrer`. Its Content Security Policy
   permits only embedded image/font data and the exact stylesheet by hash, plus
   the close-window script by hash on a page without the link back, with no
-  external assets or network requests. The link honors reduced motion like the
+  external assets or network requests. Inline hashes use HTML-normalized line
+  endings so Windows CRLF checkouts receive the same styling and script behavior
+  as LF checkouts. The link honors reduced motion like the
   shared Button. A valid callback shows the headline
   **Sign-in received** and asks the person to return to the app to finish
   verification, then follows

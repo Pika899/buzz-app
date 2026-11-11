@@ -142,21 +142,28 @@ viewport):
   a channel entered that scope: evidence then reaches past what windows loaded,
   up to each batch's 500-row limit. A cache clear or newly accessible channel
   starts that repair at once; an overflow waits for the next recovery tick.
-  Later repairs, refreshes included, leave `sampled` set. When entry did not
-  capture a verified, idle window with all of its history (rows sit above it, or
-  it was cached, refreshing or still paging), the **New messages** divider waits
-  for `sampled`, then appears only at `oldestUnreadId` among the rows loaded on
-  entry and only below a read one. While it waits, the timeline holds its own
-  reading (dwell and bottom catch-up), which would otherwise read the loaded
-  rows and erase the evidence it waits for; the hold ends when the repair
-  finishes or fails, and reading then starts at once. A batch that filled its
-  limit can still stop short of the true oldest unread message, and the
-  read-row condition covers only ordinary rows: catch-up's `activity:` mark
-  reads all of them up to a timestamp, but never mentions, broadcasts,
-  broadcast replies or messages marked unread, which only their own `msg:` or
-  `thread:` marks read. A short sample can hide an unread one of those above
-  the window, and the divider then lands below it. A row above read only by
-  its own mark says nothing about older rows either.
+  Later repairs, refreshes included, leave `sampled` set. Until it is set,
+  `sampling` says a repair that can set it is reading, about to restart, or not
+  yet asked for; one that fails, overflows or is abandoned (a dropped
+  connection, an access change) without a restart clears it until the next
+  starts. When entry did not capture a verified, idle window with all of its
+  history (rows sit above it, or it was cached, refreshing or still paging), the
+  **New messages** divider waits for `sampled`, then appears only at
+  `oldestUnreadId` among the rows loaded on entry and only below one that a
+  channel-wide read reaches (`attention()` reports `prefixRead`: the channel
+  frontier, its `activity:` catch-up mark or the retention floor), because each
+  of those also reads every older ordinary row. While it waits with `sampling`
+  set, the timeline holds its own reading (dwell and bottom catch-up), which
+  would otherwise read the loaded rows and erase the evidence it waits for. Once
+  `sampled` is set the divider is placed and reading starts at once; if
+  `sampling` clears first, the visit settles with no divider and reading resumes
+  without waiting for a retry. A batch that filled its limit can still stop
+  short of the true oldest unread message. `prefixRead` rules that out for
+  ordinary rows, but not for mentions, broadcasts, broadcast replies or messages
+  marked unread, which catch-up's `activity:` mark never reads: a short sample
+  can hide an unread one of those above the window, and the divider then lands
+  below it. Rows above read only by their own `msg:` or `thread:` marks, as
+  dwell short of the bottom leaves them, place no divider.
 - Both keys use verified event timestamps, never wall time. Neither enters generic
   channel/thread inheritance or remote override baselines. Channel catch-up ends
   a local manual unread on the channel itself; message and thread manual-unread
@@ -464,6 +471,49 @@ asked again. Residuals: a direct reply older than 5,000 of the viewer's
 root-tag matches is not seen, and a single deletion event that names several
 of the viewer's messages is visible only if all of them are retained. Replies
 still require retained evidence of their own.
+
+## Captured explicit reads
+
+`prepareChannelRead(channelId, rootId?)` captures the channel's existing
+prefix/time cut and owned local-mark keys once. Invoke its returned function to
+save or retry that same intent; a retry does not capture later arrivals or a
+new clock cut. The optional root still bounds a DM reader's channel cut; it is
+not a narrow thread operation.
+
+`prepareThreadRead(channelId, rootId)` instead captures the retained verified
+incoming replies below a retained canonical root. Each captured reply keeps its own
+message ID and timestamp. It reads no root, other thread, or subsequently loaded
+reply, even one with an older timestamp. It clears the selected thread's local
+mark and captured reply marks; independent channel, root-message and other-thread
+marks remain. The shared message-unread sidebar hint also remains until channel
+open reconciles it: that hint has no subtree ownership, even when this window
+has a forced-message overlay. Per-message receipts stay device-local, as with
+`markMessageRead`.
+Neither operation acquires or disposes a consumer's reading lease or discovers
+all historical messages/marks.
+
+Both operations reserve a saved-journal snapshot at preparation, before their
+channel queue can wait. Mark all shares one saved revision cut across its selected
+channels; the predicates retain only that revision, not copies of the full journal.
+The replacing storage transaction checks the *current*
+local manual-unread revisions before changing any frontier or local mark. A newer
+saved mark among the captured keys rejects the whole save, including marks saved
+by another local window. Prepare a new operation to explicitly read that newer
+intent. Earlier same-window manual actions already queued at preparation remain
+eligible to clear, but only if their saves succeed. A manual save queued behind
+the read remains unread when it later commits. An earlier queued save that
+overwrites a newer window's same-key mark does not authorize clearing that
+intervening intent. This is not a claim of atomicity
+between a pending call and its eventual return. Remote unread overrides keep
+the existing frontier semantics; this fence does not order identical remote
+marker tuples or change automatic observation.
+
+Capture requires initialized read-state storage (`await unread.ensure()` before
+preparation). A failed capture rejects every invocation of that operation rather
+than moving the snapshot to save time; prepare again after readiness/recovery.
+Storage failures retain the cut for retry. Access revoke/regrant, cache clear or
+session disposal invalidate captured intent. The thread operation additionally
+requires its captured message evidence to remain valid.
 
 ## Explicit clearing matrix
 

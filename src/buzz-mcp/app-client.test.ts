@@ -158,6 +158,30 @@ it("carries connection authorities independently of query event authors", async 
   expect(query).toHaveBeenCalledWith([{ kinds: [39000] }]);
 });
 
+it("reads effective edit state as the agent and withholds it after the turn retires", async () => {
+  const result = gate<Awaited<ReturnType<AgentHandle["effectiveEdit"]>>>();
+  const effectiveEdit = vi.fn(() => result.promise);
+  let live = true;
+  const client = appClient({ effectiveEdit } as unknown as AgentHandle, {
+    read: vi.fn(),
+    memories: async () => ({ entries: [], partial: false }),
+    check: () => {
+      if (!live) throw new Error("retired");
+    },
+  });
+  const pending = client.effectiveEdit?.("target", "private");
+  expect(effectiveEdit).toHaveBeenCalledWith("target", "private");
+  live = false;
+  result.resolve({ id: "head" } as Awaited<
+    ReturnType<AgentHandle["effectiveEdit"]>
+  >);
+  await expect(pending).rejects.toThrow("retired");
+  await expect(client.effectiveEdit?.("target", "private")).rejects.toThrow(
+    "retired",
+  );
+  expect(effectiveEdit).toHaveBeenCalledOnce();
+});
+
 it("does not invent authority when a host has none", () => {
   const client = appClient({ pubkey: "agent" } as AgentHandle, {
     read: vi.fn(),
@@ -373,6 +397,84 @@ it("offers the handle's settings, checking the turn before each call", () => {
   expect(settings.set).toHaveBeenCalledOnce();
   expect(settings.list).not.toHaveBeenCalled();
   expect(settings.get).not.toHaveBeenCalled();
+});
+
+it("forwards workspace discovery and one-use filing only while the app client is live", async () => {
+  let live = true;
+  const file = vi.fn(async () => {});
+  const list = vi.fn(async () => [{ id: "work", name: "Work" }]);
+  const prepare = vi.fn(async () => file);
+  const client = appClient(
+    { soloWorkspaces: { list, prepare } } as unknown as AgentHandle,
+    {
+      read: async () => new Uint8Array(),
+      memories: async () => ({ entries: [], partial: false }),
+      check: () => {
+        if (!live) throw new Error("retired");
+      },
+    },
+  );
+  expect(await client.soloWorkspaces?.list()).toEqual([
+    { id: "work", name: "Work" },
+  ]);
+  const place = await client.soloWorkspaces?.prepare("work", ["owner"], "chat");
+  expect(prepare).toHaveBeenCalledExactlyOnceWith(
+    "work",
+    ["owner"],
+    "chat",
+    undefined,
+  );
+  live = false;
+  await expect(place?.("chat")).rejects.toThrow("retired");
+  expect(file).not.toHaveBeenCalled();
+  await expect(client.soloWorkspaces?.list()).rejects.toThrow("retired");
+});
+
+it("rejects app retirement after a completed placement without undoing it", async () => {
+  const started = gate<void>(),
+    release = gate<void>();
+  let live = true,
+    durable = false;
+  const file = vi.fn(async () => {
+    durable = true;
+    started.resolve();
+    await release.promise;
+    return { status: "filed" as const };
+  });
+  const client = appClient(
+    {
+      soloWorkspaces: { list: async () => [], prepare: async () => file },
+    } as unknown as AgentHandle,
+    {
+      read: async () => new Uint8Array(),
+      memories: async () => ({ entries: [], partial: false }),
+      check: () => {
+        if (!live) throw new Error("retired");
+      },
+    },
+  );
+  const place = await client.soloWorkspaces?.prepare("work", ["owner"], "chat");
+  const pending = place?.("chat");
+  const refused = expect(pending).rejects.toThrow("retired");
+  try {
+    await started.promise;
+    expect(durable).toBe(true);
+    live = false;
+  } finally {
+    release.resolve();
+  }
+  await refused;
+  expect(file).toHaveBeenCalledExactlyOnceWith("chat");
+  expect(durable).toBe(true);
+});
+
+it("does not expose workspace capability on unsupported handles", () => {
+  expect(
+    appClient({} as AgentHandle, {
+      read: async () => new Uint8Array(),
+      memories: async () => ({ entries: [], partial: false }),
+    }).soloWorkspaces,
+  ).toBeUndefined();
 });
 
 it("never passes on an owner-read capability, even from a handle that carries one", () => {

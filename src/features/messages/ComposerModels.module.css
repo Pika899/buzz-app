@@ -222,7 +222,9 @@ html[data-keyboard-navigation] .thumb:focus-within {
 .slider[data-pointer-moving],
 .slider[data-dragging] .tetherSway,
 html[data-keyboard-input] .slider,
-html[data-keyboard-input] .slider * {
+html[data-keyboard-input]
+  .slider
+  :where(.thumbFace, .tetherSway, [class~="buzz-button"]) {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {

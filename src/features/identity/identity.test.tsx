@@ -20,8 +20,10 @@ import type { EventTemplate } from "nostr-tools";
 import { npubEncode, nsecEncode } from "nostr-tools/nip19";
 import { formatPublicKey } from "../../shared/identity/public-key";
 import nsecBackup from "../../../src-tauri/src/nsec_backup.rs?raw";
+import nativeIdentity from "../../../src-tauri/src/identity.rs?raw";
 import {
   createIdentity,
+  MALFORMED_IDENTITY,
   nativeIdentityEnabled,
   RECOVERY_REFUSED,
   RECOVERY_UNAVAILABLE,
@@ -654,6 +656,12 @@ it("matches native recovery's unavailable and refused messages exactly", () => {
     `const UNAVAILABLE: &str = "${RECOVERY_UNAVAILABLE}";`,
   );
   expect(nsecBackup).toContain(`const REFUSED: &str = "${RECOVERY_REFUSED}";`);
+});
+
+it("matches native's unreadable-key answer, which offers removing the key", () => {
+  expect(nativeIdentity).toContain(
+    `const MALFORMED: &str = "${MALFORMED_IDENTITY}";`,
+  );
 });
 
 it("keeps a failed cancellation visible and blocks key changes until Back succeeds", async () => {
@@ -4938,7 +4946,8 @@ it.each(["launches Buzz", "arrives on the landing"])(
       }
       const heading = await invitedHeading("relay.example.com:8443");
       expect(heading).toBeVisible();
-      expect(heading).toHaveFocus();
+      // Focus follows the page in a passive effect, after the heading renders.
+      await waitFor(() => expect(heading).toHaveFocus());
       expect(screen.getByText(INVITED_COPY)).toBeVisible();
       expect(landingButtons()).toEqual(["Create account", SIGN_IN, "Not now"]);
       // Opening the link sent the lookup and nothing else: no browser, no key.
@@ -5194,15 +5203,20 @@ it("the same invite opened again over its failed lookup looks the community up a
   let next: ReturnType<typeof landingRelay> | undefined;
   try {
     await screen.findByRole("heading", { name: "Finding community" });
+    // The lookup starts in an effect; fail its request once it is waiting.
+    await waitFor(() =>
+      expect(failed.relayCalls).toContainEqual(failed.lookup[0]),
+    );
     await act(async () => failed.info.reject(new Error("Offline")));
     await screen.findByRole("heading", { name: "Couldn’t find community" });
     // The page's own Retry would be lost with the lookup it belongs to.
     screen.getByRole("button", { name: "Retry" }).focus();
     next = landingRelay(design);
     links.arrive(osInvite(design, "second"));
-    expect(
-      await screen.findByRole("heading", { name: "Finding community" }),
-    ).toHaveFocus();
+    const finding = await screen.findByRole("heading", {
+      name: "Finding community",
+    });
+    await waitFor(() => expect(finding).toHaveFocus());
     await act(async () => next?.info.resolve());
     expect(await invitedHeading("design")).toBeVisible();
     expect(next.relayCalls).toEqual(next.lookup);
@@ -8606,6 +8620,93 @@ it("restore denial does not become first run or generate a replacement", async (
   identity.dispose();
 });
 
+it("a saved key that can't be read offers Remove from device instead of a retry, which signs out to restart", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "identity_restore") throw MALFORMED_IDENTITY;
+    if (command === "sign_out") return undefined;
+    return idleUploader(command);
+  });
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  render(
+    <Welcome
+      identity={identity}
+      communities={noJoin}
+      invites={invites}
+      account={unlinked}
+      connect={vi.fn()}
+    >
+      <p>Restored</p>
+    </Welcome>,
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Buzz can’t read the key saved on this computer",
+  );
+  expect(
+    screen.queryByRole("button", { name: "Retry secure storage access" }),
+  ).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Remove from device" }));
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Remove the unreadable key?",
+  });
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(commands()).not.toContain("sign_out");
+  await user.click(screen.getByRole("button", { name: "Remove from device" }));
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Remove from device",
+    }),
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("sign_out", {
+      wipe: false,
+      removeAgents: false,
+    }),
+  );
+  expect(commands().filter((c) => c === "identity_restore")).toHaveLength(1);
+  identity.dispose();
+});
+
+it("a refused removal of an unreadable key says why and can be tried again", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "identity_restore") throw MALFORMED_IDENTITY;
+    // Native refusals arrive as `{ message }`, not as an Error.
+    if (command === "sign_out")
+      throw { message: "Another Buzz app is open. Quit it and try again." };
+    return idleUploader(command);
+  });
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  render(
+    <Welcome
+      identity={identity}
+      communities={noJoin}
+      invites={invites}
+      account={unlinked}
+      connect={vi.fn()}
+    >
+      <p>Restored</p>
+    </Welcome>,
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Remove from device" }),
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(
+    within(dialog).getByRole("button", { name: "Remove from device" }),
+  );
+  expect(
+    await within(dialog).findByText(
+      "Another Buzz app is open. Quit it and try again.",
+    ),
+  ).toBeVisible();
+  expect(
+    within(dialog).getByRole("button", { name: "Remove from device" }),
+  ).toBeEnabled();
+  identity.dispose();
+});
+
 it("import failure keeps setup open without falling through to creation", async () => {
   vi.mocked(invoke)
     .mockResolvedValueOnce(null)
@@ -9697,6 +9798,8 @@ const anotherKeyOnDevice = (
       return { seq: 1, pass: 0, builderlab: true, status: "idle" };
     if (command === "nsec_backup_confirmed") return confirmed;
     if (command === "sign_out") return signedOut();
+    // Replace's copy of a device key with no backup.
+    if (command === "identity_export") return key;
     throw new Error(`Unexpected command ${command}`);
   });
 const AFTER_RESTART = "buzz.sign-in-after-restart.v1";
@@ -9732,7 +9835,25 @@ const signOuts = () =>
 /** The replace question's wording for a key with a confirmed backup, and without one. */
 const BACKED_UP =
   "Its key was backed up in Builderlab: sign in to that account again to restore it.";
-const MAYBE_NOT_BACKED_UP = "It may not be backed up.";
+const MAYBE_NOT_BACKED_UP =
+  "Its key may not be backed up: copy its private key first, or you could lose that account.";
+/** Replace, which waits on a copy of a device key with no backup and "I have my key". */
+const replaceKeyButton = () => screen.getByRole("button", { name: "Replace" });
+const haveKeyBox = () =>
+  screen.getByRole("checkbox", { name: "I have my key" });
+async function copyDeviceKey(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = await replaceDialog();
+  await user.click(
+    within(dialog).getByRole("button", { name: "Copy private key" }),
+  );
+  await waitFor(() =>
+    expect(haveKeyBox()).not.toHaveAttribute("aria-disabled"),
+  );
+  // A copy alone is not enough: the user also says they have the key.
+  expect(replaceKeyButton()).toBeDisabled();
+  await user.click(haveKeyBox());
+  expect(replaceKeyButton()).toBeEnabled();
+}
 
 it("a sign-in to another account with a key kept here asks even for a backed-up device key, saying it is backed up, and Replace restarts to sign in again", async () => {
   anotherKeyOnDevice(true);
@@ -9743,6 +9864,9 @@ it("a sign-in to another account with a key kept here asks even for a backed-up 
   // A backup receipt is not consent: it only changes what the question says.
   expect(await replaceDialog()).toHaveTextContent(BACKED_UP);
   expect(signOuts()).toEqual([]);
+  expect(screen.queryByRole("button", { name: "Copy private key" })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "I have my key" })).toBeNull();
+  expect(replaceKeyButton()).toBeEnabled();
   await user.click(screen.getByRole("button", { name: "Replace" }));
   await waitFor(() =>
     expect(signOuts()).toEqual([
@@ -9817,12 +9941,68 @@ it("a sign-out that never restarts Buzz fails setup instead of waiting forever",
   }
 });
 
-it("Replace signs the device key out to restart and sign in again", async () => {
+it("revealing a device key with no backup, or a failed copy, doesn't enable Replace without “I have my key”", async () => {
+  anotherKeyOnDevice(false);
+  const fallback = vi.mocked(invoke).getMockImplementation();
+  let exportFails = true;
+  vi.mocked(invoke).mockImplementation((command, args) =>
+    command === "identity_export" && exportFails
+      ? Promise.reject({ message: "denied" })
+      : (fallback as typeof invoke)(command, args),
+  );
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  await relaunchToAnotherAccount(user, identity);
+  const dialog = await replaceDialog();
+  await user.click(
+    within(dialog).getByRole("button", { name: "Copy private key" }),
+  );
+  expect(
+    await within(dialog).findByText(/Couldn’t copy your private key/),
+  ).toBeVisible();
+  expect(haveKeyBox()).toHaveAttribute("aria-disabled", "true");
+  expect(replaceKeyButton()).toBeDisabled();
+  exportFails = false;
+  await user.click(
+    within(dialog).getByRole("button", { name: "Reveal private key" }),
+  );
+  await waitFor(() =>
+    expect(haveKeyBox()).not.toHaveAttribute("aria-disabled"),
+  );
+  expect(replaceKeyButton()).toBeDisabled();
+  await user.click(haveKeyBox());
+  expect(replaceKeyButton()).toBeEnabled();
+  await user.click(haveKeyBox());
+  expect(replaceKeyButton()).toBeDisabled();
+  expect(signOuts()).toEqual([]);
+  identity.dispose();
+});
+
+it("a second replace question starts over: Replace disabled and “I have my key” unchecked and disabled", async () => {
   anotherKeyOnDevice(false);
   const identity = createIdentity();
   const user = userEvent.setup();
   await relaunchToAnotherAccount(user, identity);
-  await replaceDialog();
+  await copyDeviceKey(user);
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(await screen.findByRole("button", { name: SIGN_IN }));
+  expect(await replaceDialog()).toHaveTextContent(MAYBE_NOT_BACKED_UP);
+  expect(replaceKeyButton()).toBeDisabled();
+  expect(haveKeyBox()).not.toBeChecked();
+  expect(haveKeyBox()).toHaveAttribute("aria-disabled", "true");
+  expect(signOuts()).toEqual([]);
+  identity.dispose();
+});
+
+it("Replace waits until a device key with no backup is copied and the user has it, then signs it out to restart and sign in again", async () => {
+  anotherKeyOnDevice(false);
+  const identity = createIdentity();
+  const user = userEvent.setup();
+  await relaunchToAnotherAccount(user, identity);
+  expect(await replaceDialog()).toHaveTextContent(MAYBE_NOT_BACKED_UP);
+  expect(replaceKeyButton()).toBeDisabled();
+  await copyDeviceKey(user);
+  expect(await navigator.clipboard.readText()).toBe(key);
   expect(signOuts()).toEqual([]);
   await user.click(screen.getByRole("button", { name: "Replace" }));
   await waitFor(() =>
@@ -9893,6 +10073,7 @@ it.each(["pubkey_already_bound", "identity_already_bound"])(
     expect(screen.queryByText("Couldn’t finish setup")).toBeNull();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     expect(signOuts()).toEqual([]);
+    await copyDeviceKey(user);
     await user.click(screen.getByRole("button", { name: "Replace" }));
     await waitFor(() =>
       expect(signOuts()).toEqual([

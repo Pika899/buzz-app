@@ -38,6 +38,7 @@ import {
 } from "./mention-admission";
 import { rememberMention } from "./mention-history";
 import {
+  composerChips,
   readComposerSnapshot,
   composerMarkdownContext,
   markdownRanges,
@@ -146,7 +147,6 @@ import { ComposerModels, type DraftPicks } from "./ComposerModels";
 import type { MentionPicks } from "../relay/messages";
 import type {
   ConversationExtensions,
-  CompletionEdit,
   CompletionPending,
   CompletionQuery,
   CompletionResolution,
@@ -154,7 +154,15 @@ import type {
   ComposerResource,
 } from "../conversation/contracts";
 import { ComposerCompletions } from "../conversation/ComposerCompletions";
-import { MENTION_RESOLVE_TIMEOUT_MS } from "../conversation/completion";
+import {
+  chosenWorkspace,
+  WorkspaceCompletion,
+  type WorkspaceCompletionTarget,
+} from "../conversation/workspace-completion";
+import {
+  MENTION_RESOLVE_TIMEOUT_MS,
+  type HostCompletionEdit,
+} from "../conversation/completion";
 import { useCompletionEditor } from "../conversation/useCompletionEditor";
 import { formatMediaTime, mediaTimeReply } from "./media-timecode";
 import { RichComposerInput } from "./RichComposerInput";
@@ -303,7 +311,11 @@ export type MessageComposerProps = {
   requireMention?: boolean | undefined;
   chatPresentation?: boolean | undefined;
   trailingTool?: ReactNode;
+  /** Only while the chat is new: `#` then offers its workspaces first. */
+  workspace?: WorkspaceCompletionTarget | undefined;
   inviteAgents?: boolean | undefined;
+  /** Narrows a submission's agents to those its owner accepts. */
+  agentFilter?: ((pubkey: string) => boolean) | undefined;
   onSend?: (id: string) => void;
   /** A plain slash command with no recipients or attachments may be consumed by
    * its conversation owner. Return false to send it as an ordinary message. */
@@ -389,7 +401,7 @@ export function MessageComposer(props: MessageComposerProps) {
 }
 
 function PersonalComposer(props: MessageComposerProps) {
-  const { session, channelId, submission } = props;
+  const { session, channelId, submission, agentFilter } = props;
   const choices = useAgentChoices(session, true, true);
   const profiles = useSyncExternalStore(
     session.profiles.subscribe,
@@ -406,7 +418,9 @@ function PersonalComposer(props: MessageComposerProps) {
   const roster = useMemo(
     () =>
       submission
-        ? choices.selectable
+        ? agentFilter
+          ? choices.selectable.filter((agent) => agentFilter(agent.pubkey))
+          : choices.selectable
         : soloRoster(
             members,
             session.viewer,
@@ -416,6 +430,7 @@ function PersonalComposer(props: MessageComposerProps) {
           ),
     [
       submission,
+      agentFilter,
       choices.selectable,
       members,
       agentPubkeys,
@@ -523,6 +538,7 @@ function Composer({
   chatPresentation = false,
   inviteAgents = false,
   trailingTool,
+  workspace,
 }: MessageComposerProps) {
   const active = useConversationPresentation();
   // Previews replace the list on every message; subscribe to this channel's facts.
@@ -1129,7 +1145,8 @@ function Composer({
   });
   // biome-ignore lint/correctness/useExhaustiveDependencies: A changed draft or edit target retires feedback about the previous paste.
   useEffect(() => {
-    setPasteTooLong(false);
+    // Avoid queuing a redundant passive update after every native keystroke.
+    if (pasteTooLong) setPasteTooLong(false);
   }, [draft, editing.target]);
   const editScope = useMessageEditScope();
   const editableRows = () =>
@@ -1230,8 +1247,16 @@ function Composer({
     (channel) => !!channel?.archived || !!channel?.readOnly,
   );
   const editDisabled = disabled || editLocked;
+  // Chips stay saved as they are until a build that understands them sends
+  // them.
+  const chips = useMemo(
+    () => composerChips(readComposerSnapshot(value.document)),
+    [value.document],
+  );
+  const unsupportedDraft = !!chips.length;
   const editingDisabled =
     disabled ||
+    unsupportedDraft ||
     admitting ||
     sending ||
     !!accepted ||
@@ -2081,7 +2106,7 @@ function Composer({
     return input.current.insertResource(resource);
   }
   function replaceCompletion(
-    edit: CompletionEdit,
+    edit: HostCompletionEdit,
     query: CompletionQuery,
     observation: ComposerObservation,
     key?: string,
@@ -2106,6 +2131,14 @@ function Composer({
       )
         return false;
     }
+    const chosen = chosenWorkspace(edit);
+    if (chosen !== undefined) {
+      // The chat's workspace leaves no text behind; the control shows it.
+      if (!workspace || editing.target || !insert("", undefined, query))
+        return false;
+      workspace.choose(chosen);
+      return true;
+    }
     if ("pending" in edit && edit.pending) {
       // Edits replace prose and add no recipients, so a chip that may become
       // one has no place there: the typed key stays literal.
@@ -2122,6 +2155,11 @@ function Composer({
       return insertMentions(edit.mentions, query);
     if ("mention" in edit && edit.mention)
       return insert(`@${edit.mention.name} `, edit.mention, query, typed);
+    if ("token" in edit && edit.token) {
+      if (editing.target) return false;
+      completion.invalidate();
+      return input.current?.insertToken(edit.token, query) ?? false;
+    }
     return (
       typeof edit.text === "string" &&
       insert(
@@ -2494,6 +2532,7 @@ function Composer({
     }
     if (
       disabled ||
+      unsupportedDraft ||
       compactingNow() ||
       accepted ||
       conflict ||
@@ -3137,6 +3176,12 @@ function Composer({
   if (attachmentsExiting && editing.target) setAttachmentsExiting(false);
   const context = (
     <div className={styles.composerContext}>
+      {unsupportedDraft && (
+        <p role="status">
+          This draft has details this version of Buzz cannot send. It is kept
+          unchanged.
+        </p>
+      )}
       {!cached && !submission && (
         <TypingIndicator
           audience="humans"
@@ -3305,18 +3350,22 @@ function Composer({
           {label}
         </label>
         {active && extensions?.completions && (
-          <ComposerCompletions
-            registry={extensions.completions}
-            editor={completion}
-            input={input}
-            session={session}
-            scope={scope}
-            channelId={channelId}
-            threadRootId={threadRootId}
-            inviteAgents={agentChoices && !editing.target}
-            replace={replaceCompletion}
-            resolved={value}
-          />
+          <WorkspaceCompletion.Provider
+            value={editing.target ? undefined : workspace}
+          >
+            <ComposerCompletions
+              registry={extensions.completions}
+              editor={completion}
+              input={input}
+              session={session}
+              scope={scope}
+              channelId={channelId}
+              threadRootId={threadRootId}
+              inviteAgents={agentChoices && !editing.target}
+              replace={replaceCompletion}
+              resolved={chips.length ? { ...value, tokens: chips } : value}
+            />
+          </WorkspaceCompletion.Provider>
         )}
         <BackgroundUploadStatus
           session={session}

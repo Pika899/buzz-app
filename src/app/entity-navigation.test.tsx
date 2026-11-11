@@ -880,7 +880,11 @@ it("lists active primary pages in the app dock", async () => {
     value: () => {},
   });
   vi.stubEnv("VITE_BUZZ_LIVE", "1");
-  // Personal space with a saved community, not the first-run join screen.
+  // An existing install with Bestie explicitly enabled, not first-run setup.
+  localStorage.setItem(
+    "buzzodz.plugins.v1",
+    JSON.stringify({ version: 3, enabled: { "buzz.bestie": true } }),
+  );
   localStorage.setItem(
     `buzz-client.v1:${viewer}`,
     JSON.stringify({
@@ -1047,6 +1051,11 @@ it.each(
 )(
   "normalizes old $name links in the same visit and caller, retaining $scope scope",
   async ({ name, scope }) => {
+    if (name === "Bestie")
+      localStorage.setItem(
+        "buzzodz.plugins.v1",
+        JSON.stringify({ version: 3, enabled: { "buzz.bestie": true } }),
+      );
     const current = legacyPageFixture();
     await findActivityRow();
     const pageId = name.toLowerCase();
@@ -1124,7 +1133,11 @@ it("opens a community-scoped page from another community, but not after leaving 
     ],
     other,
   );
-  await screen.findByRole("tab", { name: "Bestie" });
+  await waitFor(() =>
+    expect(member.plugins.snapshot().activation["fixture.notes"]?.status).toBe(
+      "active",
+    ),
+  );
   let result!: ReturnType<typeof member.navigation.open>;
   act(() => {
     result = member.navigation.open(target);
@@ -1140,7 +1153,11 @@ it("opens a community-scoped page from another community, but not after leaving 
     [{ id: other, name: "Other community" }],
     other,
   );
-  await screen.findByRole("tab", { name: "Bestie" });
+  await waitFor(() =>
+    expect(left.plugins.snapshot().activation["fixture.notes"]?.status).toBe(
+      "active",
+    ),
+  );
   act(() => {
     result = left.navigation.open(target);
   });

@@ -1053,3 +1053,25 @@ it("keeps a shown issue when reading it again for its signed image fails", async
     image,
   );
 });
+
+it("resolves relative links against each body's own item, and follows a new item", () => {
+  const view = render(
+    <>
+      <GitHubBody body="[next](../2)" url="https://github.com/o/a/pull/1" />
+      <GitHubBody body="[next](../2)" url="https://github.com/o/b/pull/1" />
+    </>,
+  );
+  const [first, second] = screen.getAllByRole("link", { name: "next" });
+  expect(first).toHaveAttribute("href", "https://github.com/o/a/2");
+  expect(second).toHaveAttribute("href", "https://github.com/o/b/2");
+  view.rerender(
+    <>
+      <GitHubBody body="[next](../2)" url="https://github.com/o/c/pull/1" />
+      <GitHubBody body="[next](../2)" url="https://github.com/o/b/pull/1" />
+    </>,
+  );
+  expect(screen.getAllByRole("link", { name: "next" })[0]).toHaveAttribute(
+    "href",
+    "https://github.com/o/c/2",
+  );
+});

@@ -506,10 +506,15 @@ export type RunnerHost = {
     signal: AbortSignal,
   ): Promise<
     | Readonly<{
-        session: AgentSessionAssociation;
-        context?: string;
-        release(): void;
-        acknowledged(): void;
+        conversation: AgentSessionSource;
+        prepare(signal: AbortSignal): Promise<
+          | Readonly<{
+              session: AgentSessionAssociation;
+              context?: string;
+              acknowledged(): void;
+            }>
+          | undefined
+        >;
       }>
     | undefined
   >;
@@ -2708,20 +2713,29 @@ export class AgentRunners {
       woke();
       return run(delivery);
     };
-    let releaseSession: (() => void) | undefined;
     const completion = Promise.resolve().then(async () => {
       this.assertProtected(agent, type, handle);
       const pick = await pickFor(job.trigger, agent, type);
       const start = await this.host.start(agent);
       if (!start.ok) throw new Error(start.reason);
       const team = this.host.team(agent.key);
-      let admission:
+      let selection:
         | ReturnType<NonNullable<RunnerHost["prepareSession"]>>
+        | undefined;
+      let admission:
+        | Promise<
+            | Readonly<{
+                session: AgentSessionAssociation;
+                context?: string;
+                acknowledged(): void;
+              }>
+            | undefined
+          >
         | undefined;
       const prepareSession: NonNullable<
         import("./service").Delivery["prepareSession"]
       > = async (placement) => {
-        admission ??=
+        selection ??=
           this.host.prepareSession?.(
             agent,
             type,
@@ -2729,16 +2743,34 @@ export class AgentRunners {
             placement,
             signal,
           ) ?? Promise.resolve(undefined);
-        const admitted = await admission;
-        releaseSession = admitted?.release;
-        if (admitted) job.work?.associate(admitted.session);
-        signal.throwIfAborted();
-        return admitted
-          ? {
-              session: admitted.session,
-              ...(admitted.context ? { context: admitted.context } : {}),
+        const selected = await selection;
+        if (!selected) return;
+        working.route(selected.conversation);
+        return {
+          conversation: selected.conversation,
+          prepare: async (deferred = false) => {
+            admission ??= selected.prepare(deferred ? lifetime : signal);
+            const admitted = await admission;
+            if (admitted) {
+              job.work?.associate(admitted.session, selected.conversation);
+              working.route(selected.conversation);
             }
-          : undefined;
+            return admitted
+              ? {
+                  session: admitted.session,
+                  ...(admitted.context ? { context: admitted.context } : {}),
+                }
+              : undefined;
+          },
+          continueDefault: async (deferred = false) => {
+            working.route(placement.conversation);
+            const { prepareSession: _prepareSession, ...original } = delivery;
+            await invoke({
+              ...original,
+              signal: deferred ? lifetime : signal,
+            });
+          },
+        };
       };
       signal.throwIfAborted();
       const delivery = Object.freeze({
@@ -2822,10 +2854,6 @@ export class AgentRunners {
         ),
       );
     });
-    void completion.then(
-      () => releaseSession?.(),
-      () => releaseSession?.(),
-    );
     void working.settled
       .then(async () => {
         this.sourceJobs.delete(job);
@@ -3141,19 +3169,22 @@ export class AgentRunners {
         : undefined;
     if (resumable) this.mark(runner.key, resumable, channel ?? "");
     let typing: (() => void) | undefined;
+    let routedThread = false;
     const beginTyping = () => {
       if (typing || !event || !channel) return;
       typing = pulseTyping(
         // Straight to custody, so pulses stay out of what it wrote.
         async (pulse) => this.require().publish(runner.member, pulse),
         // Where its turn answers, read the same way.
-        this.host
-          .soloChat(agent, channel, runner.controller.signal)
-          .then((flat) => {
-            if (wake && !wakeLands(wake, flat))
-              throw new Error("The wake has no conversation here");
-            return flat || wake?.topLevel === true;
-          }),
+        routedThread
+          ? Promise.resolve(false)
+          : this.host
+              .soloChat(agent, channel, runner.controller.signal)
+              .then((flat) => {
+                if (wake && !wakeLands(wake, flat))
+                  throw new Error("The wake has no conversation here");
+                return flat || wake?.topLevel === true;
+              }),
         event,
         channel,
         runner.typing,
@@ -3214,6 +3245,16 @@ export class AgentRunners {
     };
     return {
       ok: () => outcome.ok && !outcome.stopped,
+      route: (conversation: AgentSessionSource) => {
+        const next = !!conversation.root;
+        if (next === routedThread) return;
+        routedThread = next;
+        if (typing) {
+          typing();
+          typing = undefined;
+          beginTyping();
+        }
+      },
       /** Settles once the run and all it handed off have, or it is retired. */
       settled,
       hold(pending: PromiseLike<unknown>) {

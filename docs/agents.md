@@ -38,7 +38,14 @@ A plugin can use `ctx.agents.registerSessionRouter` to attach local data to a
 native agent session before execution. The argument type is
 `Parameters<Agents["registerSessionRouter"]>[0]` from `@buzz/author`.
 The host checks the request's authority and keeps the signed message and its
-attachments. Replies use the source conversation.
+attachments. An optional `route()` can select `"source-thread"` before the host
+selects the logical lifetime. It receives the verified `source` and the
+`defaultConversation`. It can read local keyed storage. It must not wait for
+relay publication or sidebar loading. Only the source root in the same channel
+is allowed. The host saves that route for later admissions and controls.
+Replies, history, tools, Work and typing then use that thread. A plugin can
+thus select an independent thread in Solo while the project Lead keeps its
+rootless session. With no selected route, the native scope stays in effect.
 
 `ready()` opens only the plugin's local keyed storage. `matches()` selects the
 sources the plugin manages. Exactly one router can match a source. Its
@@ -54,7 +61,8 @@ carry `{sessionKey, router, association}`. Tool arguments and prompt text cannot
 set this value. The context stays pending until the harness acknowledges a
 request. Plugins finish relay publication and sidebar updates separately.
 
-The first association adopts the source lifetime with `intent: "existing"` and
+A new thread route starts with `intent: "new"`. A first association in the
+default native scope adopts the source lifetime with `intent: "existing"` and
 `adopted: true`. This does not prove whether the harness has a saved session.
 **New** changes the logical key and uses `intent: "new"`. Follow-ups, retries,
 restore, reconnect and Compact keep the key. A saved invocation keeps its key
@@ -65,11 +73,19 @@ cross-device execution guarantee.
 
 A native type opts in with `sessionAdmission: true`. It must carry
 out its authority and scope checks, then call `Delivery.prepareSession` with
-the source and native conversation before handover. A channel-scoped session
-can include several source threads. The type carries the returned session and
-context as `Delivery.session` and `Delivery.sessionContext`. It carries
+the source and native conversation before handover. The source keeps its
+physical thread root even when the default conversation is rootless. The type
+uses the returned `conversation` for its native key. It calls the returned
+`prepare()` inside its existing session-control handover callback, after New
+or Compact completes. If preparation declines a newly selected route,
+`continueDefault()` delivers the original request in its default scope before
+native execution starts. An accepted saved association cannot be withdrawn.
+A channel-scoped session can include several source threads. The type carries
+the prepared session and context as `Delivery.session` and `Delivery.sessionContext`. It carries
 `Delivery.session` into its tool context and `Delivery.sessionContext` into its
-prompt. Claude, Codex, goose and Pi implement this contract. With no router and
+prompt. New resets the logical key inside the same control callback as the
+native reset. A failed reset blocks admission until New succeeds. Claude,
+Codex, goose and Pi implement this contract. With no router and
 no saved association, the extension adds no execution or publication work.
 
 ## Creating and changing agents from a conversation

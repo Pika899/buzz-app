@@ -920,14 +920,9 @@ function Composer({
   const sessionPlace = useMemo(
     () => ({
       channelId,
-      ...(!solo &&
-      channelType !== "dm" &&
-      channelType !== "solo" &&
-      threadRootId
-        ? { root: threadRootId }
-        : {}),
+      ...(threadRootId ? { root: threadRootId } : {}),
     }),
-    [channelId, solo, channelType, threadRootId],
+    [channelId, threadRootId],
   );
   // A one-to-one DM wakes its other member without an explicit mention.
   // Include that session in both the rendered state and late send rechecks.

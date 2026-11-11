@@ -709,7 +709,17 @@ export type Delivery<Config = unknown> = Readonly<{
       conversation: AgentSessionSource;
     }>,
   ): Promise<
-    Readonly<{ session: AgentSessionAssociation; context?: string }> | undefined
+    | Readonly<{
+        conversation: AgentSessionSource;
+        prepare(
+          deferred?: boolean,
+        ): Promise<
+          | Readonly<{ session: AgentSessionAssociation; context?: string }>
+          | undefined
+        >;
+        continueDefault(deferred?: boolean): Promise<void>;
+      }>
+    | undefined
   >;
   /** The live route's channel; absent when the wire scope was ambiguous. */
   channelId?: string;
@@ -769,7 +779,11 @@ export type Effort = Readonly<{ id: string; label: string }>;
 export type SessionAction = "compact" | "new";
 /** Immediate controls for an existing conversation; separate from run picks. */
 export type SessionControlAction = SessionAction | "interrupt";
-export type SessionPlace = Readonly<{ channelId: string; root?: string }>;
+export type SessionPlace = Readonly<{
+  channelId: string;
+  root?: string;
+  sessionScope?: "thread";
+}>;
 export type SessionState = "idle" | "active" | "compacting" | "unavailable";
 export type AgentMigrationSetting = Readonly<{
   id: string;
@@ -969,6 +983,7 @@ export type AgentType<Config = unknown> = {
       agent: Agent<Config>,
       place: SessionPlace,
       action: SessionControlAction,
+      reset?: (change: () => Promise<void>) => Promise<void>,
     ): Promise<void>;
     subscribe(listener: () => void): () => void;
   };
@@ -2179,14 +2194,13 @@ export class AgentsService extends Service implements Agents {
     this.runners = new AgentRunners({
       prepareSession: async (agent, type, trigger, placement, signal) => {
         if (
-          !this.sessionAdmissions.active() ||
           !type.sessionAdmission ||
           (trigger.type !== "mention" &&
             trigger.type !== "plugin" &&
             trigger.type !== "attention")
         )
           return;
-        return this.sessionAdmissions.prepare({
+        return this.sessionAdmissions.resolve({
           agent: agent.key,
           owner: agent.owner,
           harness: agent.type,
@@ -4545,6 +4559,31 @@ export class AgentsService extends Service implements Agents {
       prior: this.rowOf(origin, pubkey)?.prior,
     });
   }
+  private sessionPlace(
+    agent: Agent,
+    type: RegisteredAgentType,
+    source: SessionPlace,
+  ): SessionPlace {
+    const routed = this.sessionAdmissions.conversation(
+      agent.key,
+      agent.type,
+      source,
+    );
+    if (routed)
+      return {
+        ...routed,
+        ...(routed.root ? { sessionScope: "thread" as const } : {}),
+      };
+    const summary = this.channelOf(agent, { tags: [["h", source.channelId]] });
+    const whole =
+      summary?.channelType === "solo" ||
+      summary?.channelType === "dm" ||
+      type.sessionControls?.scope(agent) === "channel";
+    return {
+      channelId: source.channelId,
+      ...(!whole && source.root ? { root: source.root } : {}),
+    };
+  }
   sessionState(key: AgentKey, place: SessionPlace): SessionState {
     const agent = this.agent(key);
     const type = agent && this.types().find((kind) => kind.key === agent.type);
@@ -4555,7 +4594,12 @@ export class AgentsService extends Service implements Agents {
       this.runners.transitioning(key)
     )
       return "unavailable";
-    return type?.sessionControls?.state(agent, place) ?? "unavailable";
+    return (
+      type?.sessionControls?.state(
+        agent,
+        this.sessionPlace(agent, type, place),
+      ) ?? "unavailable"
+    );
   }
   async session(
     key: AgentKey,
@@ -4578,21 +4622,15 @@ export class AgentsService extends Service implements Agents {
       const current = shown();
       if (current?.type !== agent.type || !this.types().includes(type))
         throw new Error("The agent's harness changed. Try again.");
-      const run = async () => {
-        await type.sessionControls?.run(current, place, action);
-      };
-      if (action !== "new" || !type.sessionAdmission) return run();
-      if (this.sessionState(key, place) !== "idle")
-        throw new Error("Wait for the active turn to finish first.");
-      const whole = type.sessionControls?.scope(current) === "channel";
-      await this.sessionAdmissions.reset(
-        key,
-        current.type,
-        {
-          channelId: place.channelId,
-          ...(!whole && place.root ? { root: place.root } : {}),
-        },
-        run,
+      const actual = this.sessionPlace(current, type, place);
+      await type.sessionControls?.run(
+        current,
+        actual,
+        action,
+        type.sessionAdmission
+          ? (change) =>
+              this.sessionAdmissions.reset(key, current.type, actual, change)
+          : undefined,
       );
     });
   }

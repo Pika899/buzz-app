@@ -467,6 +467,7 @@ export class PiRuntime {
     agent: Agent,
     place: SessionPlace,
     action: SessionControlAction,
+    reset?: (change: () => Promise<void>) => Promise<void>,
   ) {
     const key = controlKey(agent, place);
     const control = `${agent.key}/${key}`;
@@ -500,7 +501,9 @@ export class PiRuntime {
       throw new Error("Wait for the active turn to finish first.");
     return this.controls.run(control, action, async (signal) => {
       signal.throwIfAborted();
-      await act(signal);
+      await (action === "new" && reset
+        ? reset(() => act(signal))
+        : act(signal));
     });
   }
 
@@ -512,27 +515,28 @@ export class PiRuntime {
     void this.pi.dispose();
   }
 
-  async run({
-    trigger,
-    agent,
-    config: raw,
-    channelId,
-    model,
-    effort,
-    team,
-    workingUntil,
-    current,
-    wakeText,
-    ignored,
-    signal,
-    step,
-    acknowledged,
-    superseded,
-    interruptible,
-    session: givenSession,
-    sessionContext: givenSessionContext,
-    prepareSession,
-  }: Delivery) {
+  async run(delivery: Delivery) {
+    const {
+      trigger,
+      agent,
+      config: raw,
+      channelId,
+      model,
+      effort,
+      team,
+      workingUntil,
+      current,
+      wakeText,
+      ignored,
+      signal,
+      step,
+      acknowledged,
+      superseded,
+      interruptible,
+      session: givenSession,
+      sessionContext: givenSessionContext,
+      prepareSession,
+    } = delivery;
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
     if (
       trigger.type !== "mention" &&
@@ -568,18 +572,19 @@ export class PiRuntime {
     const solo =
       (await this.reads(agent.key)?.soloChat(agent.owner, channel, signal)) ??
       false;
-    const topLevel = solo || wake?.topLevel === true;
+    let topLevel = solo || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
-    const { key, source } = await this.key(
+    let { key, source } = await this.key(
       entry,
       agent.key,
       event,
       channel,
       topLevel,
     );
-    const admitted = await prepareSession?.({
+    const defaultKey = key;
+    const selected = await prepareSession?.({
       source,
       conversation: {
         channelId: channel,
@@ -588,8 +593,14 @@ export class PiRuntime {
           : {}),
       },
     });
-    const session = admitted?.session ?? givenSession;
-    const sessionContext = admitted?.context ?? givenSessionContext;
+    if (selected) {
+      key = selected.conversation.root
+        ? `${channel}/${selected.conversation.root}`
+        : channel;
+      if (selected.conversation.root) topLevel = false;
+    }
+    let session = givenSession;
+    let sessionContext = givenSessionContext;
     const root = threadReference(event)?.rootId ?? event.id;
     const where = { channel, root, topLevel };
     // A turn keeps the posting policy it was admitted with: a request under
@@ -603,7 +614,12 @@ export class PiRuntime {
     // A delivery during a session action waits for it, past its handover.
     const control = `${agent.key}/${key}`;
     let interrupted = false;
-    const handoff = this.controls.deliver(control, async () => {
+    const handoff = this.controls.deliver(control, async (deferred) => {
+      const admitted = await selected?.prepare(deferred);
+      if (selected && !admitted && key !== defaultKey)
+        return selected.continueDefault(deferred);
+      session = admitted?.session ?? session;
+      sessionContext = admitted?.context ?? sessionContext;
       await wait;
       if (interrupted || (wake && current && !current())) return;
       this.live(entry, agent.key);
@@ -1288,7 +1304,7 @@ export class PiRuntime {
           : `${channelId}/${root}`,
       source: {
         channelId,
-        ...(!topLevel && summary?.dm !== true ? { root } : {}),
+        ...(summary?.dm !== true ? { root } : {}),
       },
     };
   }
@@ -1433,7 +1449,9 @@ export class PiRuntime {
 /** The conversation key session controls in `place` act on, as `key` makes
  * it: a DM or Solo chat has no root here. */
 const controlKey = (agent: Agent, place: SessionPlace) =>
-  config(agent.config).scope === "channel" || !place.root
+  (config(agent.config).scope === "channel" &&
+    place.sessionScope !== "thread") ||
+  !place.root
     ? place.channelId
     : `${place.channelId}/${place.root}`;
 

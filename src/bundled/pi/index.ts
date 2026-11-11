@@ -155,7 +155,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
     sessionControls: {
       scope: (agent) => config(agent.config).scope,
       state: (agent, place) => runtime.sessionState(agent, place),
-      run: (agent, place, action) => runtime.session(agent, place, action),
+      run: (agent, place, action, reset) =>
+        runtime.session(agent, place, action, reset),
       subscribe: (listener) => runtime.subscribe(listener),
     },
     models: (agent) => runtime.models(agent),

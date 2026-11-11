@@ -319,7 +319,9 @@ export class GooseRuntime {
   }
   private readonly controls = new SessionControls(() => this.notify());
   private controlKey(agent: Agent, place: SessionPlace) {
-    return config(agent.config).scope === "channel" || !place.root
+    return (config(agent.config).scope === "channel" &&
+      place.sessionScope !== "thread") ||
+      !place.root
       ? place.channelId
       : `${place.channelId}/${place.root}`;
   }
@@ -336,6 +338,7 @@ export class GooseRuntime {
     agent: Agent,
     place: SessionPlace,
     action: SessionControlAction,
+    reset?: (change: () => Promise<void>) => Promise<void>,
   ) {
     const key = this.controlKey(agent, place);
     const control = `${agent.key}/${key}`;
@@ -350,9 +353,12 @@ export class GooseRuntime {
       throw new Error("Wait for the active turn to finish first.");
     return this.controls.run(control, action, async (signal) => {
       signal.throwIfAborted();
-      const result = await entry.sessions.reset(key, action);
-      signal.throwIfAborted();
-      if (!result.ok) throw new Error(result.error);
+      const change = async () => {
+        const result = await entry.sessions.reset(key, action);
+        signal.throwIfAborted();
+        if (!result.ok) throw new Error(result.error);
+      };
+      await (action === "new" && reset ? reset(change) : change());
     });
   }
 
@@ -366,29 +372,30 @@ export class GooseRuntime {
     this.agents.clear();
   }
 
-  async run({
-    trigger,
-    agent,
-    config: raw,
-    channelId,
-    team,
-    model,
-    effort,
-    synced,
-    workingUntil,
-    current,
-    wakeText,
-    ignored,
-    signal,
-    step,
-    acknowledged,
-    superseded,
-    interruptible,
-    named,
-    session: givenSession,
-    sessionContext: givenSessionContext,
-    prepareSession,
-  }: Delivery) {
+  async run(delivery: Delivery) {
+    const {
+      trigger,
+      agent,
+      config: raw,
+      channelId,
+      team,
+      model,
+      effort,
+      synced,
+      workingUntil,
+      current,
+      wakeText,
+      ignored,
+      signal,
+      step,
+      acknowledged,
+      superseded,
+      interruptible,
+      named,
+      session: givenSession,
+      sessionContext: givenSessionContext,
+      prepareSession,
+    } = delivery;
     const settings = config(raw);
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
     if (
@@ -439,7 +446,7 @@ export class GooseRuntime {
       channel,
       signal,
     );
-    const topLevel = solo || wake?.topLevel === true;
+    let topLevel = solo || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // `fresh` is for a session that has been shown nothing yet.
     const prompt = async (fresh: boolean, admitted?: string) => {
@@ -465,12 +472,6 @@ export class GooseRuntime {
       });
       return {
         key: turn.key,
-        source: {
-          channelId: channel,
-          ...(!topLevel && !turn.channel.dm
-            ? { root: threadReference(event)?.rootId ?? event.id }
-            : {}),
-        },
         shown: turn.shown,
         place: where.name
           ? `#${where.name}`
@@ -480,18 +481,38 @@ export class GooseRuntime {
         text: resumed ? `${text}\n\n${RESUMED_PROMPT}` : text,
       };
     };
-    const { key, text: prepared, place, shown, source } = await prompt(false);
-    const admitted = await prepareSession?.({
+    const snapshot = this.relay(agent.key)?.snapshot();
+    const channels =
+      snapshot?.status === "ready" ? snapshot.session.channels : undefined;
+    const summary =
+      channels?.list().channels.find((item) => item.id === channel) ??
+      channels?.get?.(channel);
+    const root = threadReference(event)?.rootId ?? event.id;
+    let key =
+      topLevel || summary?.channelType === "dm" || settings.scope === "channel"
+        ? channel
+        : `${channel}/${root}`;
+    const source = {
+      channelId: channel,
+      ...(summary?.channelType !== "dm" ? { root } : {}),
+    };
+    const defaultKey = key;
+    const selected = await prepareSession?.({
       source,
       conversation: {
         channelId: channel,
-        ...(key !== channel
-          ? { root: threadReference(event)?.rootId ?? event.id }
-          : {}),
+        ...(key !== channel ? { root } : {}),
       },
     });
-    const session = admitted?.session ?? givenSession;
-    const sessionContext = admitted?.context ?? givenSessionContext;
+    if (selected) {
+      key = selected.conversation.root
+        ? `${channel}/${selected.conversation.root}`
+        : channel;
+      if (selected.conversation.root) topLevel = false;
+    }
+    const { text: prepared, place, shown } = await prompt(false, key);
+    let session = givenSession;
+    let sessionContext = givenSessionContext;
     signal.throwIfAborted();
     const handoff = this.controls.deliver(
       `${agent.key}/${key}`,
@@ -500,6 +521,11 @@ export class GooseRuntime {
         // the short deadline for handing a message to the harness.
         if (this.agents.get(agent.key) !== entry) return;
         if (!deferred) signal.throwIfAborted();
+        const admitted = await selected?.prepare(deferred);
+        if (selected && !admitted && key !== defaultKey)
+          return selected.continueDefault(deferred);
+        session = admitted?.session ?? session;
+        sessionContext = admitted?.context ?? sessionContext;
         let noteRoot: string | undefined;
         let notes: ReturnType<NonNullable<AgentHandle["notes"]>> = [];
         const prior = entry.policies.get(key);

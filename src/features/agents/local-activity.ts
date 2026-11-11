@@ -1,4 +1,7 @@
-import type { AgentSessionAssociation } from "./session-admission";
+import type {
+  AgentSessionAssociation,
+  AgentSessionSource,
+} from "./session-admission";
 export const REPLY_CORRELATION_MS = 120_000;
 
 export type LocalWorkState =
@@ -287,12 +290,21 @@ export function createLocalAgentActivity() {
       };
       return {
         channelId: input.channelId,
-        associate: (session: AgentSessionAssociation) => {
+        associate: (
+          session: AgentSessionAssociation,
+          conversation: AgentSessionSource,
+        ) => {
           const current = entries.get(id);
           if (!current) return;
           entries.set(
             id,
-            Object.freeze({ ...current, session: structuredClone(session) }),
+            Object.freeze({
+              ...current,
+              session: structuredClone(session),
+              ...(conversation.root
+                ? { threadRootId: conversation.root, thread: true }
+                : {}),
+            }),
           );
           publish();
         },

@@ -499,7 +499,8 @@ export class CodexRuntime {
   private controlKey(agent: Agent, place: SessionPlace) {
     return JSON.stringify([
       place.channelId,
-      this.resolveConfig(agent.config).scope === "channel"
+      this.resolveConfig(agent.config).scope === "channel" &&
+      place.sessionScope !== "thread"
         ? "channel"
         : (place.root ?? "channel"),
     ]);
@@ -522,11 +523,16 @@ export class CodexRuntime {
       ? "active"
       : "idle";
   }
-  session(agent: Agent, place: SessionPlace, action: SessionControlAction) {
+  session(
+    agent: Agent,
+    place: SessionPlace,
+    action: SessionControlAction,
+    reset?: (change: () => Promise<void>) => Promise<void>,
+  ) {
     const abort = new AbortController();
     const pending = {
       abort,
-      done: this.changeSession(agent, place, action, abort.signal),
+      done: this.changeSession(agent, place, action, abort.signal, reset),
     };
     const actions = this.actions.get(agent.key) ?? new Set();
     this.actions.set(agent.key, actions);
@@ -541,6 +547,7 @@ export class CodexRuntime {
     place: SessionPlace,
     action: SessionControlAction,
     lifetime: AbortSignal,
+    reset?: (change: () => Promise<void>) => Promise<void>,
   ): Promise<void> {
     const reads = this.reads(agent.key);
     const remote = await this.inspect?.(agent.key);
@@ -567,32 +574,36 @@ export class CodexRuntime {
           `${agent.key}/${conversation}`,
           action,
           async () => {
-            await this.storage.set(
-              key,
-              JSON.stringify({ key: crypto.randomUUID(), intent: "new" }),
-            );
-            this.inventoryReads.delete(agent.key);
-            this.inventories.set(
-              agent.key,
-              (this.inventories.get(agent.key) ?? []).filter(
-                (row) => row.key !== conversation,
-              ),
-            );
-            this.inventoryVersions.set(
-              agent.key,
-              this.conversationVersion(agent.key) + 1,
-            );
-            const prior = this.remote.get(key);
-            this.remote.delete(key);
-            prior?.runtime.dispose();
-            if (prior) await this.disposeExecution(agent.key, prior.execution);
-            this.views.set(
-              agent.key,
-              [...this.remote.values()]
-                .filter((entry) => entry.agent === agent.key)
-                .flatMap((entry) => entry.runtime.sessions(agent.key)),
-            );
-            for (const listener of this.listeners) listener();
+            const change = async () => {
+              await this.storage.set(
+                key,
+                JSON.stringify({ key: crypto.randomUUID(), intent: "new" }),
+              );
+              this.inventoryReads.delete(agent.key);
+              this.inventories.set(
+                agent.key,
+                (this.inventories.get(agent.key) ?? []).filter(
+                  (row) => row.key !== conversation,
+                ),
+              );
+              this.inventoryVersions.set(
+                agent.key,
+                this.conversationVersion(agent.key) + 1,
+              );
+              const prior = this.remote.get(key);
+              this.remote.delete(key);
+              prior?.runtime.dispose();
+              if (prior)
+                await this.disposeExecution(agent.key, prior.execution);
+              this.views.set(
+                agent.key,
+                [...this.remote.values()]
+                  .filter((entry) => entry.agent === agent.key)
+                  .flatMap((entry) => entry.runtime.sessions(agent.key)),
+              );
+              for (const listener of this.listeners) listener();
+            };
+            await (reset ? reset(change) : change());
           },
         );
       if ((await this.storage.read(key)) === null) {
@@ -623,15 +634,22 @@ export class CodexRuntime {
       signal.throwIfAborted();
       const saved = entry.saved[key];
       if (action === "new") {
-        if (!saved) return;
-        delete entry.saved[key];
-        try {
-          await this.storage.set(entry.storageKey, JSON.stringify(entry.saved));
-        } catch (error) {
-          entry.saved[key] = saved;
-          throw error;
-        }
-        this.forget(agent.key, key);
+        const change = async () => {
+          if (!saved) return;
+          delete entry.saved[key];
+          try {
+            await this.storage.set(
+              entry.storageKey,
+              JSON.stringify(entry.saved),
+            );
+          } catch (error) {
+            entry.saved[key] = saved;
+            throw error;
+          }
+          this.forget(agent.key, key);
+          return;
+        };
+        await (reset ? reset(change) : change());
         return;
       }
       if (agent.protection && !this.handle(agent.key)?.protection)
@@ -1621,7 +1639,7 @@ export class CodexRuntime {
     const channel = await reads.channel(channelId);
     const solo = await reads.soloChat(agent.owner, channelId, delivery.signal);
     const huddle = isHuddleRoom(channel?.about);
-    const topLevel = solo || huddle || wake?.topLevel === true;
+    let topLevel = solo || huddle || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return delivery.ignored?.();
     // Only a Solo chat's Canvas is handed over.
     const canvas = reads.canvas?.bind(reads);
@@ -1637,35 +1655,53 @@ export class CodexRuntime {
     // A stop during the reads deleted this agent's entry; recreating it would
     // reopen the agent.
     delivery.signal.throwIfAborted();
-    const toolRoot = channel?.dm || topLevel ? undefined : rootOf(event);
-    const root = settings.scope === "channel" ? undefined : toolRoot;
+    let toolRoot = channel?.dm || topLevel ? undefined : rootOf(event);
+    let root = settings.scope === "channel" ? undefined : toolRoot;
     delivery.signal.throwIfAborted();
-    const conversationKey = JSON.stringify([channelId, root ?? "channel"]);
-    const admitted = await delivery.prepareSession?.({
-      source: { channelId, ...(toolRoot ? { root: toolRoot } : {}) },
+    let conversationKey = JSON.stringify([channelId, root ?? "channel"]);
+    const defaultKey = conversationKey;
+    const selected = await delivery.prepareSession?.({
+      source: { channelId, ...(!channel?.dm ? { root: rootOf(event) } : {}) },
       conversation: { channelId, ...(root ? { root } : {}) },
     });
-    if (admitted)
-      delivery = {
-        ...delivery,
-        session: admitted.session,
-        sessionContext: admitted.context,
-        prepareSession: undefined,
-      };
+    if (selected) {
+      root = selected.conversation.root;
+      if (root) {
+        toolRoot = root;
+        topLevel = false;
+      }
+      conversationKey = JSON.stringify([channelId, root ?? "channel"]);
+    }
 
     if (await this.inspect?.(agent.key)) {
       const handoff = this.controls.deliver(
         `${agent.key}/${conversationKey}`,
-        async () => {
+        async (deferred) => {
+          const admitted = await selected?.prepare(deferred);
+          if (selected && !admitted && conversationKey !== defaultKey)
+            return selected.continueDefault(deferred);
           const runtime = await this.connection(
             agent.key,
             reads.scope,
             conversationKey,
-            delivery.signal,
+            deferred ? undefined : delivery.signal,
           );
-          await runtime.run(delivery);
+          const accepted = deferred ? runtime.target?.signal : delivery.signal;
+          if (!accepted)
+            throw new Error("The remote Codex lifetime is unavailable");
+          await runtime.run({
+            ...delivery,
+            ...(admitted
+              ? { session: admitted.session, sessionContext: admitted.context }
+              : {}),
+            signal: accepted,
+          });
         },
       );
+      if (handoff.deferred) {
+        delivery.workingUntil(handoff.done);
+        return;
+      }
       return handoff.done;
     }
     if (this.disposed) throw new Error("Codex runtime is disposed");
@@ -1740,6 +1776,16 @@ export class CodexRuntime {
       async (deferred) => {
         if (deferred) entry.abort.signal.throwIfAborted();
         else delivery.signal.throwIfAborted();
+        const admitted = await selected?.prepare(deferred);
+        if (selected && !admitted && conversationKey !== defaultKey) {
+          entry.waiting.delete(request);
+          request.answered();
+          return selected.continueDefault(deferred);
+        }
+        if (admitted) {
+          request.session = admitted.session;
+          request.sessionContext = admitted.context;
+        }
         const text = textOf(request.event, agent.name);
         let lane = entry.lanes.get(key);
         if (!lane) {

@@ -34,6 +34,10 @@ export type AgentSessionAssociation = Readonly<{
   association: JsonValue;
 }>;
 
+type AdmissionRequest = Omit<
+  AgentSessionAdmission,
+  "sessionKey" | "intent" | "association" | "adopted"
+>;
 export type AgentSessionRouter = Readonly<{
   id: string;
   /** Opens local keyed storage. This must not wait for a sidebar or relay. */
@@ -44,6 +48,10 @@ export type AgentSessionRouter = Readonly<{
       "agent" | "owner" | "harness" | "source"
     >,
   ): boolean;
+  route?(
+    input: Omit<AdmissionRequest, "conversation"> &
+      Readonly<{ defaultConversation: AgentSessionSource }>,
+  ): "source-thread" | undefined | Promise<"source-thread" | undefined>;
   /** Saves the local association before returning. Undefined leaves the run unchanged. */
   prepare(input: AgentSessionAdmission): Promise<
     | Readonly<{
@@ -63,6 +71,7 @@ type Pointer = Readonly<{
 type Saved = AgentSessionAssociation &
   Readonly<{
     context?: string;
+    conversation?: AgentSessionSource;
     contextAcknowledged?: true;
   }>;
 
@@ -83,6 +92,24 @@ const keyFor = (agent: AgentKey, harness: string, source: AgentSessionSource) =>
     source.channelId,
     source.root ?? null,
   ]);
+type Route = Readonly<{
+  associated?: true;
+  router: string;
+  conversation: AgentSessionSource;
+}>;
+const routeKey = (
+  agent: AgentKey,
+  harness: string,
+  source: AgentSessionSource,
+) =>
+  SESSION_ADMISSION_PREFIX +
+  JSON.stringify([
+    "route",
+    agent,
+    harness,
+    source.channelId,
+    source.root ?? null,
+  ]);
 const savedKey = (sessionKey: string) =>
   SESSION_ADMISSION_PREFIX + JSON.stringify(["session", sessionKey]);
 
@@ -90,8 +117,6 @@ const savedKey = (sessionKey: string) =>
 export function createSessionAdmissions(root: Context, storage: AgentStore) {
   const routers = createContributions<AgentSessionRouter>(root);
   const pending = new Map<string, Promise<Saved | undefined>>();
-  const handingOver = new Map<string, number>();
-  const resetting = new Set<string>();
   let stopped = false;
   root.effect(() => () => {
     stopped = true;
@@ -101,53 +126,111 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
     if (stopped) throw new Error("Agent session admission is stopped");
   };
   return {
-    active: () => routers.snapshot().length > 0,
+    conversation(agent: AgentKey, harness: string, source: AgentSessionSource) {
+      const text = storage.get(routeKey(agent, harness, source));
+      return text === null ? undefined : parse<Route>(text).conversation;
+    },
     register(ctx: Context, router: AgentSessionRouter) {
       if (
         !ctx.pluginOwner ||
         !/^[a-z0-9][a-z0-9._-]*$/.test(router.id) ||
         typeof router.ready !== "function" ||
         typeof router.matches !== "function" ||
-        typeof router.prepare !== "function"
+        typeof router.prepare !== "function" ||
+        (router.route !== undefined && typeof router.route !== "function")
       )
         throw new Error(
           "A session router needs an id, ready, matches and prepare",
         );
       routers.register(ctx, router);
     },
-    async prepare(
-      input: Omit<
-        AgentSessionAdmission,
-        "sessionKey" | "intent" | "association" | "adopted"
-      >,
-    ) {
+    async resolve(request: AdmissionRequest) {
+      check(request.signal);
+      const sourceKey = routeKey(
+        request.agent,
+        request.harness,
+        request.source,
+      );
+      if (!routers.snapshot().length && storage.get(sourceKey) === null) return;
+      let input = request;
+      const candidates = routers.snapshot();
+      await Promise.all(candidates.map((router) => router.ready()));
       check(input.signal);
-      const pointerKey = keyFor(input.agent, input.harness, input.conversation);
-      if (resetting.has(pointerKey))
-        throw new Error("The agent session is being reset");
-      handingOver.set(pointerKey, (handingOver.get(pointerKey) ?? 0) + 1);
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        input.signal.removeEventListener("abort", release);
-        const remaining = (handingOver.get(pointerKey) ?? 1) - 1;
-        if (remaining) handingOver.set(pointerKey, remaining);
-        else handingOver.delete(pointerKey);
-      };
-      input.signal.addEventListener("abort", release, { once: true });
-      let retained = false;
-      try {
-        const candidates = routers.snapshot();
-        if (!candidates.length) return;
-        await Promise.all(candidates.map((router) => router.ready()));
+      const routeText = await storage.read(sourceKey);
+      const priorRoute =
+        routeText === null ? undefined : parse<Route>(routeText);
+      const matches = candidates.filter((router) =>
+        priorRoute ? router.key === priorRoute.router : router.matches(input),
+      );
+      if (matches.length > 1)
+        throw new Error("More than one plugin routes this agent session");
+      const router = matches[0];
+      if (!router && !priorRoute) return;
+      const invocationKey =
+        SESSION_ADMISSION_PREFIX +
+        JSON.stringify([
+          "invocation",
+          input.agent,
+          input.harness,
+          input.invocationId,
+        ]);
+      const invocation = await storage.read(invocationKey);
+      const priorSessionText =
+        invocation === null
+          ? null
+          : await storage.read(savedKey(parse<string>(invocation)));
+      const priorSession =
+        priorSessionText === null ? undefined : parse<Saved>(priorSessionText);
+      let conversation =
+        priorSession?.conversation ??
+        priorRoute?.conversation ??
+        input.conversation;
+      if (invocation === null && !priorRoute && router?.route) {
+        const { conversation: defaultConversation, ...beforeRoute } = input;
+        const choice = await router.route({
+          ...beforeRoute,
+          defaultConversation,
+        });
         check(input.signal);
-        const matches = candidates.filter((router) => router.matches(input));
-        if (!matches.length) return;
-        if (matches.length !== 1)
-          throw new Error("More than one plugin routes this agent session");
-        const router = matches[0];
-        if (!router) return;
+        if (choice !== undefined && choice !== "source-thread")
+          throw new Error("Unsupported agent session route");
+        if (choice === "source-thread") {
+          if (
+            !input.source.root ||
+            !/^[0-9a-f]{64}$/i.test(input.source.root) ||
+            input.source.channelId !== input.conversation.channelId
+          )
+            throw new Error(
+              "A source-thread route needs a verified root in the same channel",
+            );
+          conversation = input.source;
+        }
+      }
+      const routerKey = priorRoute?.router ?? router?.key;
+      if (!routerKey)
+        throw new Error("The agent session router is unavailable");
+      const selected: Route = priorRoute ?? {
+        router: routerKey,
+        conversation,
+      };
+      const heldRoute = parse<Route>(
+        await storage.add(sourceKey, JSON.stringify(selected)),
+      );
+      conversation =
+        invocation !== null && priorSession && !priorSession.conversation
+          ? request.conversation
+          : (priorSession?.conversation ?? heldRoute.conversation);
+      if (
+        conversation.channelId !== input.source.channelId ||
+        (conversation.root !== undefined &&
+          conversation.root !== input.source.root)
+      )
+        throw new Error("The saved agent route does not match its source");
+      input = { ...input, conversation };
+      const prepareAdmission = async (signal: AbortSignal) => {
+        input = { ...request, conversation, signal };
+        check(signal);
+        const pointerKey = keyFor(input.agent, input.harness, conversation);
         const firstKey = JSON.stringify([
           input.agent,
           input.harness,
@@ -156,21 +239,18 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         const pointer = parse<Pointer>(
           await storage.add(
             pointerKey,
-            JSON.stringify({ sessionKey: firstKey, adopted: true }),
+            JSON.stringify({
+              sessionKey: firstKey,
+              ...(conversation.root !== request.conversation.root
+                ? {}
+                : { adopted: true }),
+            }),
           ),
         );
         if (!pointer.sessionKey || pointer.resetting)
           throw new Error(
             "The agent session reset is incomplete. Use New again before sending a message.",
           );
-        const invocationKey =
-          SESSION_ADMISSION_PREFIX +
-          JSON.stringify([
-            "invocation",
-            input.agent,
-            input.harness,
-            input.invocationId,
-          ]);
         const sessionKey = parse<string>(
           await storage.add(invocationKey, JSON.stringify(pointer.sessionKey)),
         );
@@ -189,10 +269,16 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
           const prior = text === null ? undefined : parse<Saved>(text);
           if (
             prior &&
-            (prior.sessionKey !== sessionKey || prior.router !== router.key)
+            (prior.sessionKey !== sessionKey ||
+              prior.router !== heldRoute.router)
           )
             throw new Error("The agent session belongs to another router");
           check(input.signal);
+          if (!router) {
+            if (!prior)
+              throw new Error("The agent session router is unavailable");
+            return prior;
+          }
           const result = await router.prepare({
             ...input,
             sessionKey,
@@ -206,7 +292,7 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
           if (!routers.snapshot().includes(router))
             throw new Error("The agent session router changed");
           if (!result) {
-            if (prior)
+            if (prior || priorRoute?.associated)
               throw new Error(
                 "The plugin cannot restore this agent session association",
               );
@@ -227,6 +313,7 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
           const saved: Saved = {
             sessionKey,
             router: router.key,
+            conversation,
             association: result.association,
             ...(result.context ? { context: result.context } : {}),
           };
@@ -243,11 +330,20 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
           if (pending.get(sessionKey) === active) pending.delete(sessionKey);
         }
         check(input.signal);
-        if (!saved) return;
-        retained = true;
+        if (!saved) {
+          if (!priorRoute?.associated) {
+            await storage.set(sourceKey, null);
+            await storage.set(invocationKey, null);
+          }
+          return;
+        }
+        if (!heldRoute.associated)
+          await storage.set(
+            sourceKey,
+            JSON.stringify({ ...heldRoute, associated: true }),
+          );
         let acknowledged = !!saved.contextAcknowledged;
         return Object.freeze({
-          release,
           acknowledged: () => {
             if (acknowledged || !saved?.context) return;
             acknowledged = true;
@@ -272,9 +368,8 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
             ? { context: saved.context }
             : {}),
         });
-      } finally {
-        if (!retained) release();
-      }
+      };
+      return Object.freeze({ conversation, prepare: prepareAdmission });
     },
     async reset(
       agent: AgentKey,
@@ -284,22 +379,15 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
     ) {
       const key = keyFor(agent, harness, source);
       if (!routers.snapshot().length && storage.get(key) === null) return run();
-      if (handingOver.has(key) || resetting.has(key))
-        throw new Error("Wait for the active turn to finish first.");
-      resetting.add(key);
-      try {
-        const text = await storage.read(key);
-        if (text === null) return run();
-        const prior = parse<Pointer>(text);
-        const sessionKey = prior.resetting
-          ? prior.sessionKey
-          : crypto.randomUUID();
-        await storage.set(key, JSON.stringify({ sessionKey, resetting: true }));
-        await run();
-        await storage.set(key, JSON.stringify({ sessionKey }));
-      } finally {
-        resetting.delete(key);
-      }
+      const text = await storage.read(key);
+      if (text === null) return run();
+      const prior = parse<Pointer>(text);
+      const sessionKey = prior.resetting
+        ? prior.sessionKey
+        : crypto.randomUUID();
+      await storage.set(key, JSON.stringify({ sessionKey, resetting: true }));
+      await run();
+      await storage.set(key, JSON.stringify({ sessionKey }));
     },
   };
 }

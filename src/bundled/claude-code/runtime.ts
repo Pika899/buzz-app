@@ -723,7 +723,9 @@ export class ClaudeRuntime {
   }
   private readonly controls = new SessionControls(() => this.notify());
   private controlKey(agent: Agent, place: SessionPlace) {
-    return config(agent.config).scope === "channel" || !place.root
+    return (config(agent.config).scope === "channel" &&
+      place.sessionScope !== "thread") ||
+      !place.root
       ? place.channelId
       : `${place.channelId}/${place.root}`;
   }
@@ -758,6 +760,7 @@ export class ClaudeRuntime {
     agent: Agent,
     place: SessionPlace,
     action: SessionControlAction,
+    reset?: (change: () => Promise<void>) => Promise<void>,
   ): Promise<void> {
     const key = this.controlKey(agent, place);
     if (await this.inspect?.(agent.key)) {
@@ -782,18 +785,21 @@ export class ClaudeRuntime {
         action,
         async (signal) => {
           if (action === "new") {
-            const held = this.remote.get(remoteKey);
-            if (held) {
-              await held.runtime.retire(agent.key);
-              await held.execution.dispose();
-            }
-            signal.throwIfAborted();
-            await this.storage.set(
-              remoteKey,
-              JSON.stringify({ key: crypto.randomUUID(), intent: "new" }),
-            );
-            this.remote.delete(remoteKey);
-            this.notify();
+            const change = async () => {
+              const held = this.remote.get(remoteKey);
+              if (held) {
+                await held.runtime.retire(agent.key);
+                await held.execution.dispose();
+              }
+              signal.throwIfAborted();
+              await this.storage.set(
+                remoteKey,
+                JSON.stringify({ key: crypto.randomUUID(), intent: "new" }),
+              );
+              this.remote.delete(remoteKey);
+              this.notify();
+            };
+            await (reset ? reset(change) : change());
             return;
           }
           const stored = await this.storage.read(remoteKey);
@@ -825,8 +831,10 @@ export class ClaudeRuntime {
       throw new Error("Wait for the active turn to finish first.");
     return this.controls.run(control, action, async (signal) => {
       signal.throwIfAborted();
-      if (action === "new") await entry.sessions.forget(key);
-      else {
+      if (action === "new") {
+        const change = () => entry.sessions.forget(key);
+        await (reset ? reset(change) : change());
+      } else {
         const result = await entry.sessions.compact(key);
         if (!result.ok) throw new Error(result.error);
       }
@@ -924,18 +932,19 @@ export class ClaudeRuntime {
     const solo =
       (await this.reads(agent.key)?.soloChat(agent.owner, channel, signal)) ??
       false;
-    const topLevel = solo || wake?.topLevel === true;
+    let topLevel = solo || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
-    const { key, source } = await this.key(
+    let { key, source } = await this.key(
       entry,
       agent,
       event,
       channel,
       topLevel,
     );
-    const admitted = await delivery.prepareSession?.({
+    const defaultKey = key;
+    const selected = await delivery.prepareSession?.({
       source,
       conversation: {
         channelId: channel,
@@ -944,14 +953,26 @@ export class ClaudeRuntime {
           : {}),
       },
     });
-    const session = admitted?.session ?? delivery.session;
-    const sessionContext = admitted?.context ?? delivery.sessionContext;
+    if (selected) {
+      key = selected.conversation.root
+        ? `${channel}/${selected.conversation.root}`
+        : channel;
+      if (selected.conversation.root) topLevel = false;
+    }
+    let session = delivery.session;
+    let sessionContext = delivery.sessionContext;
     signal.throwIfAborted();
     if (this.execution && (await this.inspect?.(agent.key))) {
       const handoff = this.controls.deliver(
         `${agent.key}/${key}`,
         async (deferred) => {
           if (this.agents.get(agent.key) !== entry) return;
+          const admitted = await selected?.prepare(deferred);
+          if (selected && !admitted && key !== defaultKey)
+            return selected.continueDefault(deferred);
+          session = admitted?.session ?? session;
+          sessionContext = admitted?.context ?? sessionContext;
+
           const runtime = await this.connection(
             agent.key,
             key,
@@ -964,7 +985,6 @@ export class ClaudeRuntime {
             ...delivery,
             session,
             sessionContext,
-            prepareSession: undefined,
             signal: accepted,
           });
         },
@@ -982,6 +1002,11 @@ export class ClaudeRuntime {
         // the short deadline for handing a message to the harness.
         if (this.agents.get(agent.key) !== entry) return;
         if (!deferred) signal.throwIfAborted();
+        const admitted = await selected?.prepare(deferred);
+        if (selected && !admitted && key !== defaultKey)
+          return selected.continueDefault(deferred);
+        session = admitted?.session ?? session;
+        sessionContext = admitted?.context ?? sessionContext;
         // `fresh` is for a session that has been shown nothing yet.
         const prompt = async (fresh: boolean) => {
           const turn = await this.turn(
@@ -1292,7 +1317,7 @@ export class ClaudeRuntime {
           : `${channelId}/${root}`,
       source: {
         channelId,
-        ...(!topLevel && summary?.dm !== true ? { root } : {}),
+        ...(summary?.dm !== true ? { root } : {}),
       },
     };
   }

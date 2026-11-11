@@ -7332,3 +7332,68 @@ it("neither lists nor runs the retired owner-read tools, while its own reads wor
   );
   await f.complete();
 });
+
+it("keeps a routed Solo thread independent and defers its admission during New", async () => {
+  const f = fixture();
+  f.soloChannels.add("channel");
+  const session = {
+    sessionKey: "logical-one",
+    router: "example/tasks",
+    association: { task: "child" },
+  };
+  const prepare = vi.fn(async () => ({ session }));
+  const continueDefault = vi.fn(async () => {});
+  const route: NonNullable<Delivery["prepareSession"]> = async (placement) => {
+    expect(placement.source).toEqual({ channelId: "channel", root });
+    expect(placement.conversation).toEqual({ channelId: "channel" });
+    return {
+      conversation: { channelId: "channel", root },
+      prepare,
+      continueDefault,
+    };
+  };
+  const call = vi.fn(async () => "bound");
+  f.added.push({
+    name: "session_probe",
+    description: "Read session context",
+    inputSchema: { type: "object" },
+    call,
+  });
+  const delivery = f.delivery("first routed turn");
+  await f.runtime.run({ ...delivery, prepareSession: route });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  await f.tool("session_probe", {});
+  expect(call.mock.calls[0]).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ channel: "channel", root, session }),
+    ]),
+  );
+  await f.complete();
+  expect(f.publish.mock.calls[0]?.[0]).toMatchObject({
+    tags: expect.arrayContaining([["e", root, "", "reply"]]),
+  });
+  const agent = {
+    ...delivery.agent,
+    config: delivery.config,
+  } as unknown as Agent;
+  const place = { channelId: "channel", root, sessionScope: "thread" as const };
+  await vi.waitFor(() =>
+    expect(f.runtime.sessionState(agent, place)).toBe("idle"),
+  );
+  const started = deferred<void>();
+  const released = deferred<void>();
+  const reset = f.runtime.session(agent, place, "new", async (change) => {
+    started.resolve();
+    await released.promise;
+    await change();
+  });
+  await started.promise;
+  await f.runtime.run({ ...f.delivery("during New"), prepareSession: route });
+  expect(prepare).toHaveBeenCalledOnce();
+  released.resolve();
+  await reset;
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+  expect(prepare).toHaveBeenLastCalledWith(true);
+  expect(continueDefault).not.toHaveBeenCalled();
+  await f.complete();
+});

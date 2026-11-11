@@ -12,6 +12,7 @@ import {
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
 import type { Emphasis, PhrasingContent, Root, Text } from "mdast";
 import type { MentionDraft } from "./mention-draft";
+import { prepareMarkdown } from "./markdown-preparation";
 import {
   Fragment,
   type Node as EditorNode,
@@ -55,19 +56,23 @@ export function composerMarkdown(draft: MentionDraft): string {
       : node.isLeaf
         ? node
         : node.copy(Fragment.fromArray(node.content.content.map(project)));
-  const doc = qualifyNamesakes(project(readComposerDocument(draft, [])));
-  return [
-    ...(draft.chatCards ?? []),
-    blocksMarkdown(doc),
-    ...(draft.gifs ?? []),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const doc = project(readComposerDocument(draft, []));
+  const wire = (body: EditorNode) =>
+    [...(draft.chatCards ?? []), blocksMarkdown(body), ...(draft.gifs ?? [])]
+      .filter(Boolean)
+      .join("\n\n");
+  const qualified = qualifyNamesakes(doc);
+  if (qualified === doc) return wire(doc);
+  // The timeline renders a too-deep or too-long body as plain text, where no
+  // span binds, so qualifiers there would only add characters.
+  const sent = wire(qualified);
+  return prepareMarkdown(sent).kind === "plain" ? wire(doc) : sent;
 }
 
 /** The timeline binds a bare `@Name` only when one tagged key carries the name.
  * Chips of different keys sharing an exact name are therefore sent as
- * `@Name (<hex>)`, the form that names one key. Code blocks stay as typed. */
+ * `@Name (<hex>)`, the form that names one key. A chip the timeline cannot bind,
+ * inside code, a link, an image, a definition or HTML, stays as typed. */
 function qualifyNamesakes(doc: EditorNode): EditorNode {
   const person = (
     node?: EditorNode,
@@ -84,16 +89,37 @@ function qualifyNamesakes(doc: EditorNode): EditorNode {
       );
   });
   if (![...keys.values()].some((set) => set.size > 1)) return doc;
-  const visit = (node: EditorNode): EditorNode => {
+  const { code, link } = composerSchema.marks;
+  const visit = (
+    node: EditorNode,
+    authored?: () => SourceRange[],
+  ): EditorNode => {
     if (node.type.spec.code) return node;
     const children: EditorNode[] = [];
-    node.forEach((child, _offset, index) => {
+    // Paragraph offsets match authoredLiteralRanges, as blocksMarkdown reads them.
+    const paragraphs = node.isTextblock
+      ? undefined
+      : authoredLiteralRanges(node);
+    let start = 0;
+    node.forEach((child, offset, index) => {
       if (!node.isTextblock) {
-        children.push(visit(child));
+        children.push(visit(child, paragraphs?.get(offset)));
         return;
       }
+      const from = start;
+      start += child.isText
+        ? child.textContent.length
+        : child.type.name === "hard_break"
+          ? 1
+          : child.attrs.source.length;
       const found = person(child);
-      if (!found || (keys.get(found.name)?.size ?? 0) < 2) {
+      if (
+        !found ||
+        (keys.get(found.name)?.size ?? 0) < 2 ||
+        code.isInSet(child.marks) ||
+        link.isInSet(child.marks) ||
+        authored?.().some((range) => from < range.end && start > range.start)
+      ) {
         children.push(child);
         return;
       }

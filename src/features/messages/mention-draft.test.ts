@@ -188,6 +188,18 @@ it("sends chips of different keys sharing a name as `@Name (<hex>)`, others bare
   expect(composerMarkdown(draft)).toBe(
     `@Honey (${"a".repeat(64)}) @Honey (${"b".repeat(64)}) @Other hi`,
   );
+  // A chip the timeline cannot bind stays as typed; its namesake in prose is
+  // still qualified, since both keys are signed.
+  expect(
+    composerMarkdown(
+      typedDraft(
+        mentionDraft({
+          text: "@Honey `@Honey`",
+          recipients: [first, { ...second, start: 8, end: 14 }],
+        }),
+      ),
+    ),
+  ).toBe(`@Honey (${"a".repeat(64)}) \`@Honey\``);
   // One key under a name, even twice, stays bare.
   expect(
     composerMarkdown(
@@ -215,4 +227,17 @@ it("sends chips of different keys sharing a name as `@Name (<hex>)`, others bare
       projectComposerDocument(schema.nodes.doc.create(null, text)).draft,
     ),
   ).toBe(`@Honey (${"a".repeat(64)}) **@Honey (${"b".repeat(64)})**`);
+  const coded = schema.nodes.paragraph.create(null, [
+    marked(first),
+    schema.text(" "),
+    schema.text("@Honey", [
+      schema.marks.recipient.create(second),
+      schema.marks.code.create(),
+    ]),
+  ]);
+  expect(
+    composerMarkdown(
+      projectComposerDocument(schema.nodes.doc.create(null, coded)).draft,
+    ),
+  ).toBe(`@Honey (${"a".repeat(64)}) \`@Honey\``);
 });

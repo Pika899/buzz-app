@@ -193,6 +193,7 @@ pnpm author:build
 (cd dist-author && pnpm pack --pack-destination ..)
 pnpm --dir /tmp/my-page add -D "$PWD/buzz-author-0.0.0-preview.1.tgz"
 buzzodz plugin build /tmp/my-page
+buzzodz plugin sign /tmp/my-page/dist
 buzzodz plugin install /tmp/my-page/dist
 buzzodz plugin enable example.page
 buzzodz plugin list
@@ -393,6 +394,9 @@ type PluginInstaller = {
   getInstallationStatus(
     id: string,
   ): "installed" | "absent" | "unavailable";
+  getInstallationSource?(
+    id: string,
+  ): "git" | "url" | "folder" | "bundled" | "absent" | "unavailable";
   subscribeInstallationStatus(
     id: string,
     listener: (status: "installed" | "absent" | "unavailable") => void,
@@ -462,6 +466,7 @@ type PluginUpdateCapability = {
   getQueue(id: string): PluginUpdateQueueSnapshot | undefined;
   subscribeQueue(id: string, listener: () => void): () => void;
   cancelQueue(id: string): boolean;
+  getOwnerStatus?(ownerId: PluginUpdateOwnerId): "retired" | "unknown"; // missing on older hosts
 };
 ```
 
@@ -545,6 +550,39 @@ replacement or host restart, so old identities then resolve as `unknown` and
 this contract does not provide cross-restart idempotency. An absent capability
 or an `unavailable` snapshot is not evidence that a prior ambiguous submission
 was rejected. A refresh does not resolve an earlier ambiguous submission.
+
+`getOwnerStatus(ownerId)` tells a caller whether a provider lifetime it captured
+earlier is over. It reports `retired` only after this host process saw that exact
+provider disposed with no queued or reviewing item and no confirmed operation
+left, so that lifetime can no longer open a review or install anything. A
+confirmed update keeps its provider unretired until the operation finishes and
+releases the shared review. Everything else is `unknown`: any provider not yet
+disposed, whether current, replaced or unregistered; an ID this host never
+registered; a lifetime older than the 16 most recently registered lifetimes; and
+any ID after a host restart. It is a point-in-time read: retirement does not
+notify subscribers. Feature-check the method; an older host without it gives no
+retirement evidence. `retired` does not say
+what happened to an earlier request: a `getQueueRequest()` result of `unknown`
+stays unknown, and retirement is not evidence of rejection, cancellation,
+installation or activation. It only means no review or operation from that
+lifetime remains, so any new submission goes through the current provider and
+the normal explicit review.
+
+`getInstallationSource` is also optional on older hosts. In a ready catalog it
+returns `absent` only when the manifest ID is missing. For a present plugin,
+`source: "bundled"` takes precedence and returns `bundled`; otherwise, a
+recognized saved `updateSource.repository`, `updateSource.url`, or
+`updateSource.root` returns `git`, `url`, or `folder`, respectively. Before the
+catalog is ready, or when a manifest ID is duplicated or saved source metadata
+is missing, unknown, malformed, or ambiguous, it returns `unavailable`.
+Git metadata follows the native saved-source contract, including SSH usernames
+such as `deploy+ci`, an empty reference (the repository default), and UTF-8
+plugin folder names with spaces. This does not widen `requestInstall` admission.
+The method returns no source location or other saved metadata, and does not
+check for or establish an update.
+Folder metadata is recognized only when its root is an
+absolute path without an embedded NUL and its plugin path is relative without
+parent components; ordinary path names may include spaces or Unicode.
 
 `requestInstall` never installs silently. It opens Settings → Plugins with the Git
 source prefilled and read-only, and the user still chooses **Find**, reviews the
@@ -1780,6 +1818,19 @@ absolute path without symbolic links, in the platform's ordinary form, and
 creates it if missing, as a process's `cwd` is. Both act with the user's full
 access; the import preview says so.
 
+`ctx.host.repositoryFolders(binding, signal)` lists the repositories folder that
+the binding's community and account configured in **Local settings**, or the
+default `~/.buzz/REPOS`. It returns immediate real directories as
+`{ name, path, displayPath }`, sorted by name, with absolute paths under the
+folder's canonical path. It follows a linked repositories folder but not linked
+children, never recurses or creates, and rejects past 4096 entries or a 1 MiB
+result, without a partial result. The plugin never names the path: the app
+renderer reads the preference and passes it to native code, which checks the
+`files` grant before any filesystem work. The app's own `!` folder chips use
+the same listing through a command for the trusted app renderer. A sent
+message carries its chips in one `buzz-tokens-v1` tag that only the app's
+composers sign; trust a chip only as far as you trust the message's author.
+
 Bundled host grants use the effective compiled manifest at revision `bundled` and
 require the plugin to be enabled in the native catalog. External grants require the
 enabled current artifact and its integrity checks; safe mode pauses external
@@ -2128,9 +2179,29 @@ a key. Use the same OS account and matching debug or release build. Missing or
 locked storage fails. It writes `plugin.artifact.json` and
 `plugin.signature.json` as the local [NIP-PS](nips/NIP-PS.md) file pair. No relay
 or URL is needed. Include both files in the imported folder or Git repository.
-Buzz checks the event ID, signature and exact artifact bytes before install and
-each load. Unsigned `manifest.json` and `plugin.js` builds remain available for
-local development.
+By default, unsigned `manifest.json` and `plugin.js` packages can be installed and
+loaded, including local development builds, folder uploads, Git imports and
+managed recommendations. Supplied signatures are always verified: Buzz checks
+the event ID, signature and exact artifact bytes before install and each load.
+Incomplete signed release pairs still fail, and a signed installation cannot
+change publishers or downgrade to unsigned through an update or rollback.
+
+To require signatures for all external plugins, launch Buzz or the CLI with
+`BUZZ_REQUIRE_PLUGIN_SIGNATURES=1`, for example
+`BUZZ_REQUIRE_PLUGIN_SIGNATURES=1 just desktop` or
+`BUZZ_REQUIRE_PLUGIN_SIGNATURES=1 buzzodz plugin install /tmp/my-page/dist`.
+This is a runtime environment setting; restart Buzz after changing its launch
+environment, and set it for each CLI invocation that should require signatures.
+Only the exact value `1` enables enforcement, including for already installed
+plugins. Unsetting it or using any other value turns enforcement off. Plugins
+built into Buzz are exempt.
+
+With enforcement enabled, existing unsigned installations remain visible with an error and can be removed
+or replaced with a signed release. They cannot activate, load code, obtain native
+host access, or serve as rollback targets. Their saved enabled setting is retained,
+so replacing one with a valid signed release can activate it immediately. A
+verification error reported by the catalog also disposes the plugin's active
+contributions.
 
 `buzzodz plugin pack DIST_DIRECTORY FILE` writes the same single-file artifact,
 unsigned, and prints its SHA-256. An organization can serve that file over HTTPS
@@ -2156,12 +2227,13 @@ decoder may discard optional metadata that exceeds that budget. Validation does
 not certify later animation frames or reject trailing bytes after the image.
 Content reads return the stored base64 icon strings. Conventional
 asset filenames are case-sensitive in both folder and Git imports; a symbolic
-link at one of those filenames rejects an unsigned candidate.
+link at one of those filenames rejects the source package during signing.
 
-`README.md`, `icon.png`, and `icon.jpg` are reserved names in an unsigned build
+`README.md`, `icon.png`, and `icon.jpg` are reserved names in a source build
 folder, with the same all-or-nothing rule as `manifest.json`: a file at one of
-those names that misses the limits above rejects the whole folder or Git import,
-reload, and signing, and an installed plugin keeps its current revision.
+those names that misses the limits above rejects signing. An invalid signed
+artifact also rejects import and reload, and an installed plugin keeps its
+current revision.
 Older hosts ignored these names, so a source tree that already ships a
 nonconforming file there (for example, a 2048×2048 `icon.png`) stops reloading
 after upgrade. To migrate, resize the file to meet the limits, or rename or move it
@@ -2203,7 +2275,8 @@ path for automatic checks in Settings → Plugins → Manage plugins. Changed pa
 offer Update, which opens access review before explicit confirmation, preserving
 the saved enabled state. Settings does not expose the immediate Reload shortcut.
 For development, `buzzodz plugin reload ID` explicitly allows replacing an enabled
-folder plugin while preserving its enabled state. The running desktop observes the
+folder plugin while preserving its enabled state. Sign the built output again
+after each change and before reloading. The running desktop observes the
 shared profile catalog every second and disposes the previous revision before
 activating the new one. Use the same `--home` and `--profile` as the app. Reloading
 identical build bytes does not restart the plugin. CLI reload applies the same
@@ -2228,8 +2301,10 @@ Opening an installed plugin's details checks its remembered folder. A matching
 package shows Up to date in the pane. Local folders are checked every five seconds
 while the pane is open and the app is visible, and again when the app becomes active.
 Checks pause during review or pending management operations. Folder checks resolve
-the saved source by installed plugin ID and return only a revision or build diagnostic,
-without reserving the native import slot. Add can prepare its own preview while a
+the saved source by installed plugin ID and return the revision and verified publisher,
+or a build diagnostic, without reserving the native import slot. Freshness compares
+both revision and publisher, so a newly signed copy of unchanged code can repair an
+unsigned installation after confirmation. Add can prepare its own preview while a
 folder check is pending. Choosing Update acquires a fresh immutable preview; checks
 never supply installation bytes. A changed package offers
 Update, which opens access review before explicit confirmation. A known update takes

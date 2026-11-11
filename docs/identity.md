@@ -206,9 +206,12 @@ device's key in place. When this device has confirmed a stored backup of the key
 (`nsec_backup_confirmed`: a backup record here, under any account, that the
 service receipted or a restore wrote), the question says the key is backed up
 in Builderlab and that signing in to its account again restores it; otherwise
-it says the key may not be backed up. A local receipt is not consent, and the
-backup may since have been deleted, so it only changes the wording. Creating or
-importing a key still refuses while one is on the device.
+it says the key may not be backed up and shows the same private-key controls
+as Settings' **Remove from device**, with its gate: **Replace** stays disabled
+until the key was revealed or copied and **I have my key** is checked. Each new
+question starts unchecked. A local receipt is not consent, and the backup may since
+have been deleted, so a confirmed backup only changes the wording and drops that
+wait. Creating or importing a key still refuses while one is on the device.
 
 An account with no key takes this device's key, else old Buzz's, else a new
 one, without asking. When the account holds no key, the account check can't
@@ -526,7 +529,15 @@ intact. **Go back** returns to community selection without completing the join.
 A trimmed nonempty name is required; the avatar is optional. Settings → Profile
 remains the editor. Denied/unavailable/corrupt storage is not first run: like the page
 shown while the saved identity opens, it is titled **Your Buzz identity**, and
-it keeps the **Retry secure storage access** path.
+it keeps the **Retry secure storage access** path. A saved key native can't
+parse (`MALFORMED`) gets the same bytes on every read, so that page offers
+**Remove from device** instead of a retry. It confirms first, then signs out as
+**Sign out of Buzz** does without erase: the next launch deletes the key and
+opens first run, which restores the account's backup or imports a key. A
+refused sign-out stays in the dialog with its reason. On Windows and Linux,
+several keyring items matching one entry (`Ambiguous`) refuse deletes as well
+as reads, so native answers `AMBIGUOUS` instead, and the page keeps **Retry**:
+the user removes the extra items with their keyring app.
 
 The key setup screen (`IdentitySetup`) is no longer shown on first launch; the
 fixture below still renders it. It offers **Create a new identity** or **Use an
@@ -1115,6 +1126,17 @@ Sign-out also asks the server to end the session, best effort: one `POST` to
 and ignores the result, so sign-out never waits for it and works offline. It
 ends only the session this copy held, never one read back from the secure
 store. Sign out of Buzz, expiry and refusals end nothing at the server.
+An explicit sign-out of a server (Settings' **Sign out**, **Switch account**,
+first run's **Use a different account**) also marks that server: its next
+sign-in sends `prompt=login` whatever the caller asks: it asks the sign-in
+provider to authenticate again instead of finishing on the browser's session as
+the account just signed out. The provider decides what the browser shows, and
+the browser's session there is not ended. The mark is a file beside the server's
+FI records (`<account>.signed-out`), so it survives a restart, and only a
+completed browser sign-in or renewal removes it. A session restored from another
+copy takes the mark as the file has it: that session may have been checked
+before another copy's sign-out, so it never erases the mark. Expiry, refusals
+and close never set it, so renewing the same account stays one click. Sign out of Buzz leaves an existing mark in place.
 
 The browser callback shows that sign-in was received and attempts to close after
 three seconds. After verified session installation, macOS can return focus to

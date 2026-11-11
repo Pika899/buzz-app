@@ -945,7 +945,12 @@ export class ClaudeRuntime {
     );
     const defaultKey = key;
     const selected = await delivery.prepareSession?.({
-      source,
+      source: wake
+        ? {
+            channelId: channel,
+            ...(source.root && wake.root ? { root: wake.root } : {}),
+          }
+        : source,
       conversation: {
         channelId: channel,
         ...(key !== channel
@@ -969,7 +974,7 @@ export class ClaudeRuntime {
           if (this.agents.get(agent.key) !== entry) return;
           const admitted = await selected?.prepare(deferred);
           if (selected && !admitted && key !== defaultKey)
-            return selected.continueDefault(deferred);
+            return selected.continueDefault(delivery, deferred);
           session = admitted?.session ?? session;
           sessionContext = admitted?.context ?? sessionContext;
 
@@ -1004,7 +1009,7 @@ export class ClaudeRuntime {
         if (!deferred) signal.throwIfAborted();
         const admitted = await selected?.prepare(deferred);
         if (selected && !admitted && key !== defaultKey)
-          return selected.continueDefault(deferred);
+          return selected.continueDefault(delivery, deferred);
         session = admitted?.session ?? session;
         sessionContext = admitted?.context ?? sessionContext;
         // `fresh` is for a session that has been shown nothing yet.

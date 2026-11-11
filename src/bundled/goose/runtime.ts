@@ -492,9 +492,12 @@ export class GooseRuntime {
       topLevel || summary?.channelType === "dm" || settings.scope === "channel"
         ? channel
         : `${channel}/${root}`;
+    const sourceRoot = wake ? wake.root : root;
     const source = {
       channelId: channel,
-      ...(summary?.channelType !== "dm" ? { root } : {}),
+      ...(summary?.channelType !== "dm" && sourceRoot
+        ? { root: sourceRoot }
+        : {}),
     };
     const defaultKey = key;
     const selected = await prepareSession?.({
@@ -523,7 +526,7 @@ export class GooseRuntime {
         if (!deferred) signal.throwIfAborted();
         const admitted = await selected?.prepare(deferred);
         if (selected && !admitted && key !== defaultKey)
-          return selected.continueDefault(deferred);
+          return selected.continueDefault(delivery, deferred);
         session = admitted?.session ?? session;
         sessionContext = admitted?.context ?? sessionContext;
         let noteRoot: string | undefined;

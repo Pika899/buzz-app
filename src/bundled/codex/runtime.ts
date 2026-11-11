@@ -1660,8 +1660,12 @@ export class CodexRuntime {
     delivery.signal.throwIfAborted();
     let conversationKey = JSON.stringify([channelId, root ?? "channel"]);
     const defaultKey = conversationKey;
+    const sourceRoot = wake ? wake.root : rootOf(event);
     const selected = await delivery.prepareSession?.({
-      source: { channelId, ...(!channel?.dm ? { root: rootOf(event) } : {}) },
+      source: {
+        channelId,
+        ...(!channel?.dm && sourceRoot ? { root: sourceRoot } : {}),
+      },
       conversation: { channelId, ...(root ? { root } : {}) },
     });
     if (selected) {
@@ -1679,7 +1683,7 @@ export class CodexRuntime {
         async (deferred) => {
           const admitted = await selected?.prepare(deferred);
           if (selected && !admitted && conversationKey !== defaultKey)
-            return selected.continueDefault(deferred);
+            return selected.continueDefault(delivery, deferred);
           const runtime = await this.connection(
             agent.key,
             reads.scope,
@@ -1780,7 +1784,7 @@ export class CodexRuntime {
         if (selected && !admitted && conversationKey !== defaultKey) {
           entry.waiting.delete(request);
           request.answered();
-          return selected.continueDefault(deferred);
+          return selected.continueDefault(delivery, deferred);
         }
         if (admitted) {
           request.session = admitted.session;

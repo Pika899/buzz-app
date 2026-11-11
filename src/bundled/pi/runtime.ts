@@ -585,7 +585,12 @@ export class PiRuntime {
     );
     const defaultKey = key;
     const selected = await prepareSession?.({
-      source,
+      source: wake
+        ? {
+            channelId: channel,
+            ...(source.root && wake.root ? { root: wake.root } : {}),
+          }
+        : source,
       conversation: {
         channelId: channel,
         ...(key !== channel
@@ -617,7 +622,7 @@ export class PiRuntime {
     const handoff = this.controls.deliver(control, async (deferred) => {
       const admitted = await selected?.prepare(deferred);
       if (selected && !admitted && key !== defaultKey)
-        return selected.continueDefault(deferred);
+        return selected.continueDefault(delivery, deferred);
       session = admitted?.session ?? session;
       sessionContext = admitted?.context ?? sessionContext;
       await wait;

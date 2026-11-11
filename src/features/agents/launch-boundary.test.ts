@@ -169,6 +169,7 @@ async function setup<Config>(
   defaults: Config,
   heads: [Subject, RelayEvent][],
   binding: ConfigBinding,
+  initialMessages: RelayEvent[] = [],
 ) {
   const storage = memoryStorage();
   seed(storage, heads);
@@ -178,6 +179,7 @@ async function setup<Config>(
     profile(owner, { name: "Owner" }),
     profile(agentKey, { name: typeId, is_agent: true }),
     ...heads.map(([, head]) => head),
+    ...initialMessages,
   ]);
   const session = createRelaySession(counted.transport);
   disposals.push(() => session.dispose());
@@ -277,16 +279,18 @@ async function setup<Config>(
       .filter((work) => !["waiting", "working"].includes(work.state)).length ===
     mentions;
   /** A new top-level mention from the owner: a new conversation. */
-  const mention = () => {
+  const mention = (root?: string) => {
     mentions++;
     const sent = message(owner, channel, "@agent hello", ++at, [
       ["p", agentKey.pubkey],
+      ...(root ? [["e", root, "", "reply"]] : []),
     ]);
     counted.live().receive([sent], { phase: "live", channelId: channel });
     return sent;
   };
   return {
     service,
+    native,
     plugin,
     session: session.session,
     requests: counted.requests,
@@ -735,3 +739,128 @@ it.each([
     expect(prompted()).toBe(0);
   },
 );
+
+it("keeps an addressed Attention wake when its selected route declines", async () => {
+  vi.useFakeTimers({ now: 1_000_000 });
+  const codex = fakeCodex();
+  const root = message(owner, channel, "Task root", 999);
+  const { seeded } = heads("buzz/codex", {
+    model: "synced-model",
+    effort: "high",
+    scope: "channel",
+  });
+  const f = await setup(
+    "codex",
+    (_relay, reads, core) =>
+      codexRun(new CodexRuntime(codex.spawn, reads, core, memoryStorage())),
+    {
+      model: "local-model",
+      effort: "low",
+      instructions: "",
+      workspace: "/this/device",
+      scope: "channel",
+    },
+    seeded,
+    synced(),
+    [root],
+  );
+  f.native.query.mockResolvedValue([root]);
+  f.plugin.agents.controlAttention();
+  const prepare = vi.fn(async () => undefined);
+  f.plugin.agents.registerSessionRouter({
+    id: "decline",
+    ready: async () => {},
+    matches: () => true,
+    route: () => "source-thread",
+    prepare,
+  });
+  await f.service.save(agentKey.pubkey, {
+    attentionEnabled: true,
+    attention: {
+      "interest/task": { type: "interest", instructions: "Check the task" },
+      "watch/tick": {
+        type: "timer",
+        interest_id: "task",
+        prompt: "Check",
+        enabled: true,
+        interval_secs: 60,
+        armed_at: 1_000,
+        max_occurrences: 1,
+        expires_at: null,
+        channel,
+        root: root.id,
+      },
+    },
+  });
+  await vi.advanceTimersByTimeAsync(60_000);
+  await vi.waitFor(() =>
+    expect(
+      codex.sent.filter((wire) => wire.method === "turn/start"),
+    ).toHaveLength(1),
+  );
+  expect(prepare).toHaveBeenCalledOnce();
+  expect(f.deliveries.map((delivery) => delivery.trigger.type)).toEqual([
+    "attention",
+    "attention",
+  ]);
+  expect(f.deliveries[1]?.trigger).toEqual(f.deliveries[0]?.trigger);
+  expect(f.deliveries[1]?.wakeText).toBe(f.deliveries[0]?.wakeText);
+});
+
+it("routes New through the admitted thread when the native default is channel scope", async () => {
+  const codex = fakeCodex();
+  const { seeded } = heads("buzz/codex", {
+    model: "synced-model",
+    effort: "high",
+    scope: "channel",
+  });
+  const f = await setup(
+    "codex",
+    (_relay, reads, core) =>
+      codexRun(new CodexRuntime(codex.spawn, reads, core, memoryStorage())),
+    {
+      model: "local-model",
+      effort: "low",
+      instructions: "",
+      workspace: "/this/device",
+      scope: "channel",
+    },
+    seeded,
+    synced(),
+  );
+  f.plugin.agents.registerSessionRouter({
+    id: "tasks",
+    ready: async () => {},
+    matches: () => true,
+    route: () => "source-thread",
+    prepare: async (input) => ({
+      association: input.association ?? { task: input.sessionKey },
+    }),
+  });
+  const first = f.mention();
+  const work = () =>
+    f.activity.reader.work().find((row) => row.messageId === first.id);
+  await vi.waitFor(() => expect(work()?.state).toBe("done"));
+  const prior = work()?.session?.sessionKey;
+  const agent = f.service.find(agentKey.pubkey);
+  if (!agent) throw new Error("Expected the local agent");
+  const place = { channelId: channel, root: first.id };
+  await vi.waitFor(() =>
+    expect(f.service.sessionState(agent.key, place)).toBe("idle"),
+  );
+  await f.service.session(agent.key, place, "new");
+  const next = f.mention(first.id);
+  await vi.waitFor(() =>
+    expect(
+      f.activity.reader.work().find((row) => row.messageId === next.id)?.state,
+    ).toBe("done"),
+  );
+  const current = f.activity.reader
+    .work()
+    .find((row) => row.messageId === next.id)?.session?.sessionKey;
+  expect(current).toBeTruthy();
+  expect(current).not.toBe(prior);
+  expect(
+    codex.sent.filter((wire) => wire.method === "thread/start"),
+  ).toHaveLength(2);
+});

@@ -717,7 +717,10 @@ export type Delivery<Config = unknown> = Readonly<{
           | Readonly<{ session: AgentSessionAssociation; context?: string }>
           | undefined
         >;
-        continueDefault(deferred?: boolean): Promise<void>;
+        continueDefault(
+          delivery: Delivery<Config>,
+          deferred?: boolean,
+        ): Promise<void>;
       }>
     | undefined
   >;

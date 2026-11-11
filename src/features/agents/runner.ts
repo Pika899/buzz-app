@@ -2762,12 +2762,12 @@ export class AgentRunners {
                 }
               : undefined;
           },
-          continueDefault: async (deferred = false) => {
+          continueDefault: async (current, deferred = false) => {
             working.route(placement.conversation);
-            const { prepareSession: _prepareSession, ...original } = delivery;
+            const { prepareSession: _prepareSession, ...original } = current;
             await invoke({
               ...original,
-              signal: deferred ? lifetime : signal,
+              signal: deferred ? lifetime : current.signal,
             });
           },
         };

@@ -61,6 +61,7 @@ sources the plugin manages. Exactly one router can match a source. Its
 `prepare()` receives the agent, owner, harness, source, conversation, invocation ID, logical
 `sessionKey`, `intent`, `adopted`, `resumed`, saved association and abort signal.
 An owner message supplies `event`. A trusted wake has no signed event.
+A rootless wake has no source root; its synthetic ID is never a thread root.
 Returning `undefined` leaves an unassociated run unchanged.
 
 The result supplies JSON `association` and optional text `context`. The host
@@ -87,7 +88,7 @@ physical thread root even when the default conversation is rootless. The type
 uses the returned `conversation` for its native key. It calls the returned
 `prepare()` inside its existing session-control handover callback, after New
 or Compact completes. If preparation declines a newly selected route,
-`continueDefault()` delivers the original request in its default scope before
+`continueDefault(delivery)` delivers the current adapted request in its default scope before
 native execution starts. An accepted saved association cannot be withdrawn.
 A channel-scoped session can include several source threads. The type carries
 the prepared session and context as `Delivery.session` and `Delivery.sessionContext`. It carries

@@ -444,6 +444,7 @@ export function createChannelStore(
         old.metadataCached === metadataCached &&
         old.visibility === channel.visibility &&
         old.joinRole === channel.joinRole &&
+        old.messagePublisher === channel.messagePublisher &&
         old.viewerRole === channel.viewerRole &&
         old.preview === preview &&
         old.hidden === channel.hidden &&

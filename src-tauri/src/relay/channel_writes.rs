@@ -20,7 +20,7 @@ fn common(event: &EventTemplate) -> bool {
     event.content.is_empty() && event.created_at <= i64::MAX as u64
 }
 fn details(event: &EventTemplate) -> bool {
-    if event.kind != 9002 || !common(event) || !(3..=14).contains(&event.tags.len()) {
+    if event.kind != 9002 || !common(event) || !(3..=15).contains(&event.tags.len()) {
         return false;
     }
     let (Some(id), Some(name), Some(about)) = (
@@ -50,6 +50,17 @@ fn details(event: &EventTemplate) -> bool {
     // NIP-CL: trailing `t` tags replace the label set; one `["t", ""]` clears it.
     if let Some(role) = tag(event, index, "join_role") {
         if !matches!(role, "member" | "guest") {
+            return false;
+        }
+        index += 1;
+    }
+    if let Some(publisher) = tag(event, index, "message_publisher") {
+        if !publisher.is_empty()
+            && !(publisher.len() == 64
+                && publisher
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        {
             return false;
         }
         index += 1;

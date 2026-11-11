@@ -1,3 +1,4 @@
+import { canStartMessage, canReplyToPublisher } from "../relay/message-policy";
 import {
   soloModelPicksKey,
   parseSoloModelPicks,
@@ -338,6 +339,7 @@ export type MessageComposerProps = {
     | undefined;
   canOpenLink?: ((target: string) => boolean) | undefined;
   threadRootId?: string;
+  policyRoot?: ChannelMessage | undefined;
   /** The viewer's latest message in this thread, once the thread has loaded.
    * An empty thread composer starts with the agents it notified (see
    * seedMentions); other composers read their own channel window. */
@@ -524,6 +526,7 @@ function Composer({
   onOpenLink,
   canOpenLink,
   threadRootId,
+  policyRoot,
   threadSeed,
   replyParentId,
   mediaTargetUrl,
@@ -550,11 +553,12 @@ function Composer({
   const listed =
     session.channels?.get || soloConversation ? session.channels : undefined;
   const channels = () => (listed?.list() ?? noChannels).channels;
-  const writable = useListedChannel(
-    listed,
-    channelId,
-    (channel) => !!channel && !channel.readOnly && !channel.archived,
-  );
+  const writable = useListedChannel(listed, channelId, (listedChannel) => {
+    const channel = listedChannel ?? session.channels?.get?.(channelId);
+    return channel?.messagePublisher !== undefined && threadRootId
+      ? canReplyToPublisher(channel, policyRoot)
+      : canStartMessage(channel, session.viewer);
+  });
   const readOnly = !submission && !!session.channels?.get && !writable;
   const cached = useListedChannel(
     listed,
@@ -1249,7 +1253,9 @@ function Composer({
   const editLocked = useListedChannel(
     listed,
     channelId,
-    (channel) => !!channel?.archived || !!channel?.readOnly,
+    (channel) =>
+      !!channel?.archived ||
+      (channel?.messagePublisher === undefined && !!channel?.readOnly),
   );
   const editDisabled = disabled || editLocked;
   const chips = useMemo(

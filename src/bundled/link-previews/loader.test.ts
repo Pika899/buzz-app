@@ -121,6 +121,30 @@ describe("createLoader", () => {
     }
   });
 
+  it("draws a card whose image failed as text at once, and retries the image", async () => {
+    const readPage = vi.fn(async () => ({
+      status: 200,
+      preview: { title: "Post", image: "https://img.example.com/a.png" },
+    }));
+    const requestBytes = vi.fn(async () => ({
+      status: 404,
+      headers: {},
+      body: new Uint8Array(),
+    }));
+    const loader = createLoader({ readPage, requestBytes });
+    const page = await loader.page("https://example.com/post");
+    expect(loader.ready("https://example.com/post")).toBeUndefined();
+    expect(
+      await loader.image("https://img.example.com/a.png").picture,
+    ).toBeNull();
+    expect(loader.ready("https://example.com/post")).toEqual({
+      page,
+      picture: null,
+    });
+    await loader.image("https://img.example.com/a.png").picture;
+    expect(requestBytes).toHaveBeenCalledTimes(2);
+  });
+
   it("is unavailable without a page reader", async () => {
     const loader = createLoader(undefined);
     expect(loader.available).toBe(false);

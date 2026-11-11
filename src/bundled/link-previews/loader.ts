@@ -45,6 +45,9 @@ export function createLoader(host: Reader | undefined) {
   const pages = new Map<string, Promise<Page | null>>();
   const images = new Map<string, Held>();
   const settled = new WeakMap<Promise<unknown>, unknown>();
+  /** Images whose last load failed, so a card that comes back draws its text
+   * at once while the image is retried. */
+  const failed = new Set<string>();
   const known = <T>(pending: Promise<T> | undefined) =>
     pending && settled.has(pending) ? (settled.get(pending) as T) : undefined;
   const waiting: (() => void)[] = [];
@@ -197,7 +200,9 @@ export function createLoader(host: Reader | undefined) {
       const page = known(pages.get(url));
       if (!page) return undefined;
       if (!page.image) return { page };
-      const picture = known(images.get(page.image)?.picture);
+      const picture = failed.has(page.image)
+        ? null
+        : known(images.get(page.image)?.picture);
       return picture === undefined ? undefined : { page, picture };
     },
     /** A lease on the image's decoded `blob:` URL. The cache keeps at most
@@ -219,7 +224,12 @@ export function createLoader(host: Reader | undefined) {
           if (picture === null && images.get(url) === entry) {
             images.delete(url);
             entry.kept = false;
-          }
+            failed.add(url);
+            for (const old of failed) {
+              if (failed.size <= KEEP_IMAGES) break;
+              failed.delete(old);
+            }
+          } else if (picture) failed.delete(url);
         });
         for (const [old, value] of images) {
           if (images.size <= KEEP_IMAGES) break;
@@ -248,6 +258,7 @@ export function createLoader(host: Reader | undefined) {
         revoke(held);
       }
       images.clear();
+      failed.clear();
       pages.clear();
       const released = waiting.splice(0);
       active += released.length;

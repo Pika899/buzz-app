@@ -1784,7 +1784,9 @@ export class CodexRuntime {
         }
         if (admitted) {
           request.session = admitted.session;
-          request.sessionContext = admitted.context;
+          if (admitted.context !== undefined)
+            request.sessionContext = admitted.context;
+          else delete request.sessionContext;
         }
         const text = textOf(request.event, agent.name);
         let lane = entry.lanes.get(key);

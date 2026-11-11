@@ -983,8 +983,8 @@ export class ClaudeRuntime {
             throw new Error("The remote Claude lifetime is unavailable");
           await runtime.run({
             ...delivery,
-            session,
-            sessionContext,
+            ...(session ? { session } : {}),
+            ...(sessionContext ? { sessionContext } : {}),
             signal: accepted,
           });
         },

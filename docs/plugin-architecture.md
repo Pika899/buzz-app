@@ -918,8 +918,10 @@ close a section, so a transcript shows which plugin said what. The agent follows
 it below the base prompt and the owner's requests. Each turn carries the
 complete current set, replacing earlier turns', so turning the plugin off or a
 `when(agent)` that stops returning `true` ends them. Write the text yourself and
-keep it short: it is sent with every turn. Context for one turn belongs in a
-note, which the agent reads as data.
+keep it short: it is sent with every turn. `addInstructions` throws on text over
+4 KB (UTF-8), and a turn carries at most 16 KB from all plugins: entries, in
+plugin and id order, are kept while they fit, and a last line names the plugins
+left out. Context for one turn belongs in a note, which the agent reads as data.
 
 The bundled **Plugin development** plugin (`buzz.plugin-development`, on by
 default) gives local agents three tools. `plugin_authoring_guide` returns

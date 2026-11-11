@@ -16,6 +16,10 @@ import type { ExternalScope } from "./external-connection";
 import { externalMcpEnabled } from "./external-connection";
 import { connectMcp } from "../../buzz-mcp/connection";
 import { type HarnessKit, harnessKit } from "../agent-harness/kit";
+import {
+  INSTRUCTIONS_TEXT_LIMIT,
+  utf8Bytes,
+} from "../agent-harness/plugin-instructions";
 import { repositoriesContext } from "../communities/repositories";
 import type {
   HostMcpServer,
@@ -382,7 +386,7 @@ export type RegisteredAgentAddedTab = Contribution<AgentAddedTab>;
  * of the app runs, or of those `when` accepts, while the plugin is on. */
 export type AgentInstructions = Readonly<{
   id: string;
-  /** Sent with every turn, so keep it short. */
+  /** Sent with every turn, so keep it short: at most 4 KB (UTF-8). */
   text: string;
   /** Whether the agent's turns get them; absent, every agent's do. Asked as
    * each turn's prompt is built. A `when` that throws leaves out only these. */
@@ -2914,6 +2918,10 @@ export class AgentsService extends Service implements Agents {
         typeof instructions.when !== "function")
     )
       throw new Error("Agent instructions need an id and text");
+    if (utf8Bytes(instructions.text.trim()) > INSTRUCTIONS_TEXT_LIMIT)
+      throw new Error(
+        `Agent instructions are over ${INSTRUCTIONS_TEXT_LIMIT / 1024} KB`,
+      );
     this.addedInstructions.register(this.ctx, instructions);
   }
   /** The instructions active plugins give this agent's turns now, ordered by

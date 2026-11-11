@@ -1,4 +1,5 @@
 import { interestPaused } from "./attention";
+import { onAutomatic } from "./recommended";
 // The agent runner: one queue per agent, its rate limit, mention and watch
 // matching, due timers, the run deadline and the claim that lets exactly one
 // host run each agent. It knows nothing of where it runs: everything it needs
@@ -169,6 +170,9 @@ async function pickFor(
     trigger.event.pubkey !== agent.owner
   )
     return {};
+  // An agent on Automatic runs on the recommendation; a pick for it, as one
+  // saved before it switched, is ignored.
+  if (onAutomatic(agent.config, type.id)) return {};
   const asked = (name: string) =>
     trigger.event.tags.find(
       (tag) => tag[0] === name && tag[1] === agent.pubkey,

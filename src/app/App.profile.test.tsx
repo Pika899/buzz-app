@@ -416,9 +416,11 @@ it("retains contributed-sidebar width across leaving, remounting and its fallbac
     });
   });
   expect(await screen.findByRole("region", { name: "Team" })).toBeVisible();
+  const team = screen.getByRole("region", { name: "Team", exact: true });
   expect(
-    screen.queryByRole("separator", { name: "Resize sidebar" }),
-  ).toBeNull();
+    within(team).getByRole("separator", { name: "Resize sidebar" })
+      .previousElementSibling,
+  ).toHaveStyle({ width: "352px" });
 
   await openSidebarPage("main", "second");
   expect(
@@ -763,7 +765,7 @@ it("keeps the same unsent conversation and companion panel through Settings sect
   const user = await setup();
   if (!services) throw new Error("Missing app services");
   const current = services;
-  await user.click(await screen.findByRole("button", { name: "New" }));
+  await user.keyboard("{Control>}n{/Control}");
   const composing = await screen.findByRole("region", { name: "New message" });
   await user.click(
     await screen.findByRole("option", { name: "Draft recipient" }),
@@ -837,7 +839,7 @@ it("keeps the same unsent conversation and companion panel through Settings sect
 
 it("returns keyboard-opened Settings to the same focused draft", async () => {
   const user = await setup();
-  await user.click(await screen.findByRole("button", { name: "New" }));
+  await user.keyboard("{Control>}n{/Control}");
   const composing = await screen.findByRole("region", { name: "New message" });
   await user.click(
     await screen.findByRole("option", { name: "Draft recipient" }),

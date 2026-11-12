@@ -1,0 +1,86 @@
+name: Personal macOS Claude subscription build
+
+on:
+  push:
+    branches: [personal/claude-subscription-macos]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build Apple Silicon app
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+      BUZZ_UPDATER_PUBLIC_KEY: ""
+      BUZZ_UPDATER_ENDPOINT: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify architecture and runner space
+        run: |
+          test "$(uname -m)" = arm64
+          df -h "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup
+      - name: Install repository-pinned Rust toolchain
+        run: ./bin/rustup toolchain install
+      - name: Check formatting, types and design contracts
+        run: ./bin/pnpm check
+      - name: Test authentication and agent configuration
+        run: ./bin/pnpm exec vitest run src/bundled/claude-code src/features/agents
+      - name: Configure personal build without official updater
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const base = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')).version.split('-')[0];
+          const version = `${base}-claude.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`;
+          writeFileSync(`${process.env.RUNNER_TEMP}/personal.json`, JSON.stringify({
+            version,
+            bundle: { createUpdaterArtifacts: false, macOS: { signingIdentity: '-' } }
+          }));
+          JS
+      - name: Build ad-hoc signed Apple Silicon application
+        run: ./bin/pnpm tauri build --ci --no-sign --bundles app --target aarch64-apple-darwin --config "$RUNNER_TEMP/personal.json" -- --locked
+      - name: Verify bundle and prepare download
+        run: |
+          set -euo pipefail
+          app=target/aarch64-apple-darwin/release/bundle/macos/Buzz.app
+          test -d "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/Buzz")" = arm64
+          codesign --verify --deep --strict --verbose=2 "$app"
+          for helper in buzz buzz-agent-command goose-acp; do
+            test -x "$app/Contents/Resources/bin/$helper"
+            test "$(lipo -archs "$app/Contents/Resources/bin/$helper")" = arm64
+          done
+          "$app/Contents/Resources/bin/buzz" --help > /dev/null
+          mkdir personal-artifact
+          ditto -c -k --sequesterRsrc --keepParent "$app" personal-artifact/Buzz-Claude-Subscription-Apple-Silicon.zip
+          cp docs/personal-build.md personal-artifact/READ-ME-FIRST.md
+          printf '%s\n' "$GITHUB_SHA" > personal-artifact/SOURCE_COMMIT
+          printf '%s\n' 'https://github.com/block/buzz-app/pull/2995' 'upstream patch: 23a7fbdbc42e70c98fb39373cb57040470bd486f' > personal-artifact/PATCH_SOURCE
+          (cd personal-artifact && shasum -a 256 Buzz-Claude-Subscription-Apple-Silicon.zip > SHA256SUMS)
+          du -sh "$app" personal-artifact
+          {
+            echo '### Personal Buzz build'
+            echo 'Apple Silicon; ad-hoc signed; not Apple notarized; not an official Buzz release.'
+            echo "Source commit: $GITHUB_SHA"
+            echo 'Authentication tests and native build passed. Real Claude/ChatGPT login and UI acceptance must be tested on the destination Mac.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Buzz-Claude-Subscription-Apple-Silicon
+          path: personal-artifact/
+          if-no-files-found: error
+          retention-days: 7

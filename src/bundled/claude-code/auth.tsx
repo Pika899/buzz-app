@@ -129,11 +129,12 @@ export class ClaudeAuth {
 
   /** Uses the Claude account from then on, signing in first, as setup's
    * step, which setup can cancel, only when Claude Code isn't already. */
-  readonly signIn: ((step: Step) => Promise<void>) | undefined = async (
-    step,
-  ) => {
+  readonly signIn:
+    | ((step: Step, active?: () => boolean) => Promise<void>)
+    | undefined = async (step, active = () => true) => {
     if (!(await this.account()))
       await step("claude", ["auth", "login"], "Sign-in");
+    if (!active()) throw new Error("Sign-in ended (stopped).");
     await this.use("account");
   };
 

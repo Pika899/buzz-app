@@ -459,8 +459,9 @@ export class ClaudeSetup {
     try {
       if (step === "install") await this.install(spawn);
       else
-        await this.auth.signIn?.((id, args, label) =>
-          this.step(spawn, id, args, label),
+        await this.auth.signIn?.(
+          (id, args, label) => this.step(spawn, id, args, label),
+          () => !this.cancelled,
         );
     } catch (error) {
       this.log(`\n${message(error)}`);

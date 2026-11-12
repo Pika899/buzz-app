@@ -386,6 +386,42 @@ it("stops a step cancelled before its process was returned", async () => {
   });
 });
 
+it("keeps the authentication choice when cancelled during an existing-account probe", async () => {
+  const { spawn: check } = scripted({
+    "claude --version": { stdout: "2.1.200\n" },
+  });
+  let release: (() => void) | undefined;
+  const spawn: Spawn = async (id, options) => {
+    if (options?.args?.join(" ") !== "auth status --json")
+      return check(id, options);
+    return {
+      write: async () => undefined,
+      end: async () => undefined,
+      kill: async () => undefined,
+      exited: new Promise<number>((resolve) => {
+        release = () => {
+          options.onStdout?.(JSON.stringify({ loggedIn: true }));
+          resolve(0);
+        };
+      }),
+    };
+  };
+  const auth = new ClaudeAuth(spawn);
+  const use = vi.spyOn(auth, "use");
+  const setup = new ClaudeSetup(spawn, undefined, auth);
+  const run = setup.run("sign-in");
+  try {
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await setup.cancel();
+  } finally {
+    release?.();
+    await run;
+  }
+  expect(use).not.toHaveBeenCalled();
+  expect(auth.found.method).toBe("api-key");
+  expect(setup.snapshot().output).toContain("Sign-in ended (stopped).");
+});
+
 it("explains that it needs the desktop app", async () => {
   const setup = new ClaudeSetup(undefined);
   await setup.check();

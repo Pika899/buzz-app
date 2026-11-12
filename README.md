@@ -7,10 +7,6 @@ computer that answer you right in the conversation.
 
 [![A 38-second demo of Buzz: an agent answers a question in a team channel, then a chat with two agents is shared with that channel](docs/assets/readme/demo.webp)](https://buzz.xyz/#demo)
 
-Watch the full-quality video at [buzz.xyz](https://buzz.xyz/#demo).
-
-![A Buzz chat with an agent replying](docs/assets/readme/solo-chat.png)
-
 ## Get started
 
 ### 1. Download

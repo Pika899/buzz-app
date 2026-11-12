@@ -197,6 +197,57 @@ describe("createLoader", () => {
     expect(requestBytes).toHaveBeenCalledTimes(2);
   });
 
+  it("remembers a failed image that was evicted while it loaded", async () => {
+    const create = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation(() => "blob:test/a");
+    const revoke = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    vi.stubGlobal(
+      "Image",
+      class {
+        src = "";
+        naturalWidth = 2;
+        naturalHeight = 1;
+        decode = async () => {};
+      },
+    );
+    try {
+      const loader = createLoader({
+        readPage: vi.fn(async () => ({
+          status: 200,
+          preview: { title: "Post", image: "https://img.example.com/0.png" },
+        })),
+        requestBytes: vi.fn(async ({ url }: { url: string }) =>
+          url.endsWith("/0.png")
+            ? { status: 404, headers: {}, body: new Uint8Array() }
+            : {
+                status: 200,
+                headers: { "content-type": "image/png" },
+                body: new Uint8Array([1]),
+              },
+        ),
+      });
+      const page = await loader.page("https://example.com/post");
+      const failing = loader.image("https://img.example.com/0.png");
+      const others = Array.from({ length: 60 }, (_, i) =>
+        loader.image(`https://img.example.com/${i + 1}.png`),
+      );
+      await failing.picture;
+      await Promise.all(others.map((lease) => lease.picture));
+      expect(loader.ready("https://example.com/post")).toEqual({
+        page,
+        picture: null,
+      });
+      loader.stop();
+    } finally {
+      vi.unstubAllGlobals();
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
   it("reads other previews while images decode", async () => {
     const create = vi
       .spyOn(URL, "createObjectURL")

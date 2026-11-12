@@ -232,15 +232,20 @@ export function createLoader(host: Reader | undefined) {
         images.set(url, entry);
         void entry.picture.then((picture) => {
           settled.set(entry.picture, picture);
-          if (picture === null && images.get(url) === entry) {
-            images.delete(url);
-            entry.kept = false;
-            failed.add(url);
+          if (picture) failed.delete(url);
+          else {
+            if (images.get(url) === entry) {
+              images.delete(url);
+              entry.kept = false;
+            }
+            // Also when it was evicted while loading, unless a newer load
+            // has taken its place.
+            if (!images.has(url)) failed.add(url);
             for (const old of failed) {
               if (failed.size <= KEEP_IMAGES) break;
               failed.delete(old);
             }
-          } else if (picture) failed.delete(url);
+          }
         });
         for (const [old, value] of images) {
           if (images.size <= KEEP_IMAGES) break;

@@ -57,10 +57,50 @@ export async function endLastHumanHuddle(
     )
   )
     return;
-  const humans = members.filter((tag) => tag[3] !== "bot");
-  if (humans.length !== 1 || humans[0]?.[1] !== viewer) return;
   // A peer missing from membership evidence may be a newly admitted human.
   if (admissions.some((key) => !members.some((tag) => tag[1] === key))) return;
+  // Membership retains history access; only audio admissions count as present.
+  const candidates = [...new Set(admissions)].filter(
+    (key) =>
+      key !== viewer &&
+      !members.some((tag) => tag[1] === key && tag[3] === "bot"),
+  );
+  if (candidates.length) {
+    // Match legacy desktop's trust boundary, not self-declared profile hints.
+    const authors = [
+      ...new Set([
+        viewer,
+        ...members
+          .filter((tag) => tag[3] === "owner")
+          .flatMap((tag) => (tag[1] ? [tag[1]] : [])),
+      ]),
+    ];
+    const agents = await session.snapshotRead(
+      [
+        {
+          kinds: [30177],
+          authors,
+          "#d": candidates,
+          limit: authors.length * candidates.length,
+          consistency: "strong",
+        },
+      ],
+      { signal },
+    );
+    if (!current()) return;
+    if (
+      candidates.some(
+        (key) =>
+          !agents.some(
+            (event) =>
+              event.kind === 30177 &&
+              authors.includes(event.pubkey) &&
+              exactLifecycleTag(event, "d") === key,
+          ),
+      )
+    )
+      return;
+  }
   const id = outbox.send(
     {
       kind: 48103,

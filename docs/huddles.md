@@ -222,9 +222,12 @@ This is a client-only implementation. It uses the existing private ephemeral
 channel creation event (9007, TTL 3600), parent announcement (48100), authenticated
 `/huddle/{room}/audio` endpoint and v2 Opus wire format. The relay owns participant
 join/leave and disconnected-call teardown. On explicit desktop hangup, the client
-ends and archives a creator-owned room when fresh relay membership identifies the
-viewer as its sole human and the native audio roster has exactly one admission
-for that viewer. Known additional devices, other human members, unknown peers,
+ends and archives a creator-owned room when the native audio roster identifies
+the viewer as its sole human, with exactly one admission for that viewer. Fresh
+relay membership classifies bot roles; connected legacy agents are recognized by
+verified kind-30177 records from the viewer or room owners. Retained membership
+for a human who left audio does not count as attendance. Known additional devices,
+other connected humans, unknown peers,
 and unavailable membership evidence preserve the room. This is a snapshot check,
 not an atomic relay admission fence; concurrent joins still depend on relay cleanup.
 It retains room membership for transcript View. Non-creators rely on relay ending

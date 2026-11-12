@@ -37,8 +37,8 @@ this desktop. Keep Buzz and the Codex agent running here; the desktop microphone
 does not turn on. Other calls on another device do not seat an agent here.
 Leaving on every connected owner device closes the remote voice connection.
 When you leave a Huddle you started, desktop also ends it if you are its only
-human member and no additional device admission is visible. The ended card's
-View action keeps the transcript accessible. Other human members or known
+human connected to audio and no additional device admission is visible. The ended card's
+View action keeps the transcript accessible. Other connected humans or known
 additional devices keep the room open.
 If agent voice stops, the compact player and Huddle window show the reason;
 leave and rejoin to retry.

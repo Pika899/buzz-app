@@ -921,10 +921,16 @@ describe("explicit last-human hangup", () => {
         type: "participants",
         participants: [destination.viewer, destination.viewer, botKey.pubkey],
       });
-    if (reason === "another human")
-      h.snapshotRead.mockResolvedValue(
-        records([["p", keypair().pubkey, "", "member"]]),
-      );
+    if (reason === "another human") {
+      const human = keypair().pubkey;
+      h.snapshotRead
+        .mockResolvedValueOnce(records([["p", human, "", "member"]]))
+        .mockResolvedValue([]);
+      h.receive({
+        type: "participants",
+        participants: [destination.viewer, botKey.pubkey, human],
+      });
+    }
     if (reason === "unknown peer")
       h.receive({
         type: "participants",
@@ -948,6 +954,70 @@ describe("explicit last-human hangup", () => {
     expect(h.archive).not.toHaveBeenCalled();
     await h.dispose();
   });
+
+  it.each([
+    "departed human",
+    "legacy agent",
+    "untrusted claim",
+    "failed lookup",
+  ])(
+    "classifies audio attendance while retaining history: %s",
+    async (scenario) => {
+      const h = await connected();
+      const other = keypair();
+      const base = records([["p", other.pubkey, "", "member"]]);
+      h.snapshotRead.mockResolvedValueOnce(base);
+      // Both identities remain members. Only a live audio seat affects hangup.
+      h.receive({
+        type: "participants",
+        participants: [destination.viewer, botKey.pubkey, other.pubkey],
+      });
+      if (scenario === "departed human")
+        h.receive({
+          type: "participants",
+          participants: [destination.viewer, botKey.pubkey],
+        });
+      else if (scenario === "failed lookup")
+        h.snapshotRead.mockRejectedValueOnce(
+          new Error("Agent lookup unavailable"),
+        );
+      else
+        h.snapshotRead.mockResolvedValueOnce([
+          signed(scenario === "legacy agent" ? viewerKey : other, {
+            kind: 30177,
+            content: "{}",
+            tags: [["d", other.pubkey]],
+          }),
+        ]);
+      await h.service.leave();
+      const ended =
+        scenario === "departed human" || scenario === "legacy agent";
+      expect(h.publish).toHaveBeenCalledTimes(ended ? 1 : 0);
+      expect(h.archive).toHaveBeenCalledTimes(ended ? 1 : 0);
+      if (ended)
+        expect(h.archive).toHaveBeenCalledWith(
+          "archive",
+          room,
+          expect.any(AbortSignal),
+          expect.any(Function),
+        );
+      if (scenario !== "departed human")
+        expect(h.snapshotRead).toHaveBeenNthCalledWith(
+          2,
+          [
+            {
+              kinds: [30177],
+              authors: [destination.viewer],
+              "#d": [other.pubkey],
+              limit: 1,
+              consistency: "strong",
+            },
+          ],
+          { signal: expect.any(AbortSignal) },
+        );
+      await h.dispose();
+    },
+  );
   it("does not end after switching communities during the fresh read", async () => {
     const h = await connected();
     const gate = deferred<ReturnType<typeof records>>();

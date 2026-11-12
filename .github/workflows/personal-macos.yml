@@ -1,4 +1,4 @@
-name: Personal macOS Claude subscription build
+name: Personal macOS Claude subscription build (Intel cross-compile)
 
 on:
   push:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     name: Test and build Apple Silicon app
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     timeout-minutes: 120
     env:
       CI: "true"
@@ -31,19 +31,53 @@ jobs:
           persist-credentials: false
       - name: Verify architecture and runner space
         run: |
-          test "$(uname -m)" = arm64
+          test "$(uname -m)" = x86_64
           df -h "$GITHUB_WORKSPACE"
-      - uses: ./.github/actions/setup
-      - name: Install repository-pinned Rust toolchain
-        run: ./bin/rustup toolchain install
+      - name: Read repository tool versions
+        id: pins
+        run: |
+          python3 - <<'PINS'
+          import os, pathlib, re, tomllib
+          values = {name: next(pathlib.Path('bin').glob(f'.{name}-*.pkg')).name.removeprefix(f'.{name}-').removesuffix('.pkg') for name in ['node', 'pnpm', 'cmake']}
+          values['rust'] = tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain']['channel']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for key, value in values.items():
+                  output.write(f'{key}={value}\n')
+          PINS
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.pins.outputs.node }}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ steps.pins.outputs.pnpm }}
+      - name: Install pinned compiler, cross target and CMake
+        env:
+          RUST_VERSION: ${{ steps.pins.outputs.rust }}
+          CMAKE_VERSION: ${{ steps.pins.outputs.cmake }}
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-apple-darwin
+          echo "RUSTUP_TOOLCHAIN=$RUST_VERSION" >> "$GITHUB_ENV"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          archive="cmake-${CMAKE_VERSION}-macos-universal.tar.gz"
+          base="https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl --fail --location --retry 3 -O "$base/$archive"
+          curl --fail --location --retry 3 -o cmake-checksums.txt "$base/cmake-${CMAKE_VERSION}-SHA-256.txt"
+          grep "  $archive$" cmake-checksums.txt > cmake-selected.sha256
+          test -s cmake-selected.sha256
+          shasum -a 256 -c cmake-selected.sha256
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/cmake-${CMAKE_VERSION}-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
+      - name: Install locked JavaScript dependencies
+        run: pnpm install --frozen-lockfile
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: personal-macos-arm64
+          key: personal-macos-intel-to-arm64
           cache-on-failure: true
       - name: Check formatting, types and design contracts
-        run: ./bin/pnpm check
+        run: pnpm check
       - name: Test authentication and agent configuration
-        run: ./bin/pnpm exec vitest run src/bundled/claude-code src/features/agents src/features/relay/session-snapshot-read.test.ts
+        run: pnpm exec vitest run src/bundled/claude-code src/features/agents src/features/relay/session-snapshot-read.test.ts
       - name: Configure personal build without official updater
         run: |
           node --input-type=module <<'JS'
@@ -56,7 +90,7 @@ jobs:
           }));
           JS
       - name: Build ad-hoc signed Apple Silicon application
-        run: ./bin/pnpm tauri build --ci --bundles app --target aarch64-apple-darwin --config "$RUNNER_TEMP/personal.json" -- --locked
+        run: pnpm tauri build --ci --bundles app --target aarch64-apple-darwin --config "$RUNNER_TEMP/personal.json" -- --locked
       - name: Verify bundle and prepare download
         run: |
           set -euo pipefail
@@ -68,7 +102,7 @@ jobs:
             test -x "$app/Contents/Resources/bin/$helper"
             test "$(lipo -archs "$app/Contents/Resources/bin/$helper")" = arm64
           done
-          "$app/Contents/Resources/bin/buzz" --help > /dev/null
+          # The arm64 helpers are verified here; execute them only on the destination Mac.
           mkdir personal-artifact
           ditto -c -k --sequesterRsrc --keepParent "$app" personal-artifact/Buzz-Claude-Subscription-Apple-Silicon.zip
           cp docs/personal-build.md personal-artifact/READ-ME-FIRST.md

@@ -19,7 +19,7 @@ Watch the full-quality video at [buzz.xyz](https://buzz.xyz/#demo).
 
 ### 1. Download
 
-Download the latest release from [buzz.xyz](https://buzz.xyz) or see
+Download the latest release from [buzz.xyz](https://buzz.xyz) or view
 [all releases](https://github.com/block/buzz-app/releases). Available for
 macOS, Windows and Linux.
 

@@ -17,9 +17,7 @@ test("Messages keeps its list beside conversations and preserves drafts and hist
   app.append("primary", "dm-peer", "[Open Beta](buzz://channel/beta)", false);
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   const index = page.getByRole("region", { name: "Team", exact: true });
   const detail = index.getByRole("region", {
     name: "Conversation detail",
@@ -189,9 +187,7 @@ test("Messages keeps its list beside conversations and preserves drafts and hist
   ).toBeFocused();
   await expect(editor).toHaveText("Keep the list conversation draft");
   await page.setViewportSize({ width: 1440, height: 950 });
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   await expect(alpha).toBeVisible();
   await index.getByRole("button", { name: "New message", exact: true }).click();
   const newMessage = index.getByRole("region", {
@@ -261,9 +257,7 @@ test("conversation lists default closed for direct opens and open for View more"
     .getByRole("button", { name: "Alpha", exact: true })
     .click();
   await expect(row).toBeHidden();
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   await expect(row).toBeVisible();
   await row.click();
   await expect(row).toBeVisible();
@@ -271,9 +265,7 @@ test("conversation lists default closed for direct opens and open for View more"
     .getByRole("button", { name: "Hide Team list", exact: true })
     .click();
   await expect(row).toBeHidden();
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   await expect(row).toBeVisible();
   await page.goBack();
   await expect(row).toBeHidden();
@@ -533,9 +525,7 @@ test("collection list resizing preserves the conversation and saved width", asyn
   await page.setViewportSize({ width: 1600, height: 950 });
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   const team = page.getByRole("region", { name: "Team", exact: true });
   await team
     .locator('[data-activity-row="alpha"] [data-conversation-row]')
@@ -569,9 +559,7 @@ test("collection list resizing preserves the conversation and saved width", asyn
   await page.keyboard.press("ArrowLeft");
   await expect(divider).toHaveAttribute("aria-valuenow", String(initial + 64));
   await page.reload();
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   await expect(divider).toHaveAttribute("aria-valuenow", String(initial + 64));
   await divider.dblclick();
   await expect(divider).toHaveAttribute("aria-valuenow", String(initial));

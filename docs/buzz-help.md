@@ -347,8 +347,8 @@ revokes all of them, and a pairing unused for 30 days expires.
   Direct, Working and Waiting use the same conversation
   views as Team; the filter icon before All chooses whose activity to show and whether
   to show unread only. Team, Activity, and Solo keep the list on the left and the
-  selected conversation on the right. Click a sidebar card’s title or **View more**
-  to open its full list. Use the card’s grabber to reorder it. **View more** opens the list by default;
+  selected conversation on the right. Click a sidebar card’s title or **Open [section name]**
+  to open its full list. Use the card’s grabber to reorder it. **Open [section name]** opens the list by default;
   sidebar chat rows, chat pins, and direct conversation links open with the list
   collapsed. Use the sidebar toggle at the left of the conversation header to
   show or hide the list without leaving the chat. Drag the list’s right edge to
@@ -688,9 +688,9 @@ revokes all of them, and a pairing unused for 30 days expires.
 - **App navigation**: one left rail contains Search, Activity, **Pins**, **Team**,
   **Solo**, and **Agents**. Plugin destinations and **Plugins** sit with Search and Activity
   in the Plugins card, which starts at the top and can be moved like any section.
-  The **→ View more** row at the bottom of the Plugins card opens the plugin catalog.
-  Each object card shows up to four rows, then **→ View more**;
-  **View more** opens a dedicated list in the main content area without expanding
+  The **→ Open Plugins** row at the bottom of the Plugins card opens the plugin catalog.
+  Each object card shows up to four rows, then **→ Open [section name]**;
+  **Open [section name]** opens a dedicated list in the main content area without expanding
   the card. Back and Forward return between the list and its items. Pins remains uncapped. The Team card shows the first four
   conversations in the full Team list, using the same filtering, unread choice,
   and ordering. Use the filter/sort button beside **+** (shown on hover or keyboard
@@ -702,12 +702,12 @@ revokes all of them, and a pairing unused for 30 days expires.
   and Waiting views can include them.
   Expanded Team and Solo lists show one-line message previews and the same
   filter and sort controls; their selection is saved for each list.
-  **View more** opens the full,
+  **Open [section name]** opens the full,
   centered conversation list; selecting a row opens its conversation in the
   reading area. **Solo** lists active Solo chats by recent activity, including
   chats you have just started before an agent replies. Its **+** opens New chat.
   Agents shows up to four available agents, ranked by existing
-  conversation/search usage. Select an agent to open their DM; **View more** opens
+  conversation/search usage. Select an agent to open their DM; **Open [section name]** opens
   the agent directory. **Plugins** opens the plugin catalog. Conversations and agent
   details use centered content columns. Team, Activity, New message, and expanded
   conversation sheets share the message-width preference and the same composer

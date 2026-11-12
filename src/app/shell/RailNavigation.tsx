@@ -537,7 +537,10 @@ export function RailNavigation({
       />
     );
     return avatarOnly ? (
-      <Tooltip content={entry.label} hint="dock">
+      <Tooltip
+        content={entry.kind === "agent" ? `DM ${entry.label}` : entry.label}
+        hint="dock"
+      >
         {control}
       </Tooltip>
     ) : (
@@ -683,9 +686,9 @@ export function RailNavigation({
       }
       footer={
         <NavigationItem
-          label="View more"
+          label="Open Team"
           data-rail-view-more=""
-          aria-label="View more team"
+          aria-label="Open Team"
           icon={<ArrowRightIcon size={18} />}
           selected={
             navigation.entry.target.kind === "page" &&
@@ -877,9 +880,9 @@ export function RailNavigation({
                 })}
                 <RailSourceRow section="navigation" entry={pluginCatalog}>
                   <NavigationItem
-                    label="View more"
+                    label="Open Plugins"
                     data-rail-view-more=""
-                    aria-label="View all plugins"
+                    aria-label="Open Plugins"
                     icon={<ArrowRightIcon size={18} />}
                     onClick={() => onSelect("settings", { section: "plugins" })}
                   />
@@ -1015,9 +1018,9 @@ export function RailNavigation({
                   title="Agents"
                   footer={
                     <NavigationItem
-                      label="View more"
+                      label="Open Agents"
                       data-rail-view-more=""
-                      aria-label="View more agents"
+                      aria-label="Open Agents"
                       icon={<ArrowRightIcon size={18} />}
                       onClick={() => onSelect("buzz.agents/agents")}
                     />

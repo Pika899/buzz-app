@@ -205,9 +205,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   await sortMessages.click();
   await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
 
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   const index = page.getByRole("region", { name: "Team", exact: true });
   await expect(
     index.getByRole("heading", { name: "Team", level: 2 }),
@@ -385,9 +383,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     recentAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
 
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   await index.getByRole("tab", { name: "Direct", exact: true }).click();
   await expect(
     index.getByRole("heading", { name: "Direct", level: 2 }),
@@ -522,9 +518,7 @@ test("agent rail rows open DMs and keep View all for the directory", async ({
       .getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
   await expect(rail.getByRole("alert")).toHaveCount(0);
-  await rail
-    .getByRole("button", { name: "View more agents", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Agents", exact: true }).click();
   await expect(page).toHaveURL(/buzz.agents/);
   await page.goBack();
   await expect(page).toHaveURL(/dm-peer/);
@@ -546,11 +540,11 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     has: page.getByRole("button", { name: "Activity", exact: true }),
   });
   await expect(
-    primary.getByRole("button", { name: "View all plugins", exact: true }),
+    primary.getByRole("button", { name: "Open Plugins", exact: true }),
   ).toBeVisible();
   await expect(
-    primary.getByRole("button", { name: "View all plugins", exact: true }),
-  ).toHaveText("View more");
+    primary.getByRole("button", { name: "Open Plugins", exact: true }),
+  ).toHaveText("Open Plugins");
   await expect(
     rail.getByRole("heading", { name: "Plugins", exact: true }),
   ).toBeVisible();
@@ -693,7 +687,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     navigation
       .locator("[data-rail-row]")
       .last()
-      .getByRole("button", { name: "View all plugins", exact: true }),
+      .getByRole("button", { name: "Open Plugins", exact: true }),
   ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("rail-arranged.png") });
   await page.emulateMedia({ colorScheme: "dark" });
@@ -832,7 +826,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     .getByRole("button", { name: "Beta", exact: true })
     .click({ button: "right" });
   await page.getByRole("menuitem", { name: "Team", exact: true }).click();
-  await messages.getByRole("button", { name: /^View more Messages$/i }).click();
+  await messages.getByRole("button", { name: /^Open Team$/i }).click();
   const messagesPage = page.getByRole("region", {
     name: "Team",
     exact: true,
@@ -860,7 +854,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await expect
     .poll(order)
     .toEqual(["pins", "navigation", "messages", "agents", "solo"]);
-  await messages.getByRole("button", { name: /^View more Messages$/i }).click();
+  await messages.getByRole("button", { name: /^Open Team$/i }).click();
   const fullBeta = messagesPage.locator(
     '[data-activity-row="beta"] [data-conversation-row]',
   );
@@ -876,7 +870,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
       .getByRole("article", { name: "Conversation", exact: true })
       .getByRole("textbox"),
   ).toBeVisible();
-  await messages.getByRole("button", { name: /^View more Messages$/i }).click();
+  await messages.getByRole("button", { name: /^Open Team$/i }).click();
   await expect(fullBeta.getByRole("img", { name: "Unread" })).toHaveCount(0);
   await fullBeta.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
@@ -894,9 +888,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page.keyboard.press("Shift+F10");
   await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
   await expect(pinnedBeta).toBeVisible();
-  await rail
-    .getByRole("button", { name: "View more agents", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Agents", exact: true }).click();
   const agentPage = page.getByRole("region", { name: "Agents", exact: true });
   await expect(
     agentPage.getByRole("heading", { name: "Agents", exact: true }),
@@ -1002,7 +994,7 @@ test.describe("Solo rail", () => {
       messages.getByRole("button", { name: "Alpha", exact: true }),
     ).toHaveCount(0);
     await messages
-      .getByRole("button", { name: "View more team", exact: true })
+      .getByRole("button", { name: "Open Team", exact: true })
       .click();
     const messagePage = page.getByRole("region", {
       name: "Team",
@@ -1028,9 +1020,7 @@ test.describe("Sidebar row limits", () => {
   }) => {
     await page.goto(app.origin);
     const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-    await rail
-      .getByRole("button", { name: "View more Solo", exact: true })
-      .click();
+    await rail.getByRole("button", { name: "Open Solo", exact: true }).click();
     const collection = page.getByRole("region", { name: "Solo", exact: true });
     await collection
       .getByRole("button", { name: "New message", exact: true })
@@ -1062,7 +1052,7 @@ test.describe("Sidebar row limits", () => {
     const solo = rail.locator('[data-rail-section="solo"]');
     await expect(solo.locator("[data-rail-row]")).toHaveCount(4);
     const more = solo.getByRole("button", {
-      name: "View more Solo",
+      name: "Open Solo",
       exact: true,
     });
     await more.focus();
@@ -1145,7 +1135,7 @@ test.describe("Sidebar row limits", () => {
     }
     const pins = rail.locator('[data-rail-section="pins"]');
     await expect(pins.locator("[data-rail-row]")).toHaveCount(6);
-    await expect(pins.getByRole("button", { name: /^View more/ })).toHaveCount(
+    await expect(pins.getByRole("button", { name: /^Open Pins/ })).toHaveCount(
       0,
     );
     const pinRows = pins.locator("[data-rail-row]");
@@ -1226,7 +1216,7 @@ test.describe("Sidebar row limits", () => {
     });
     await expect(customCard.locator("[data-rail-row]")).toHaveCount(4);
     await customCard
-      .getByRole("button", { name: "View more Saved chats", exact: true })
+      .getByRole("button", { name: "Open Saved chats", exact: true })
       .click();
     const customPage = page.getByRole("region", {
       name: "Saved chats",
@@ -1327,9 +1317,7 @@ test("Messages and Activity expose aligned view filters", async ({
     exact: true,
   });
   await expect(activityDraft.getByRole("textbox")).toBeEditable();
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   const messages = page.getByRole("region", { name: "Team", exact: true });
   const previewText =
     "Messages preview stays on one line even when this message is long. "

@@ -54,7 +54,7 @@ test("row previews use entry metadata even when component identity is wrapped", 
   expect(screen.getByRole("button", { name: "Chat 4" })).not.toBeNull();
   expect(screen.queryByRole("button", { name: "Chat 5" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Chat 6" })).toBeNull();
-  expect(screen.getByRole("button", { name: "View more Solo" })).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Open Solo" })).not.toBeNull();
 });
 
 test.each(["pins", "custom:work", "agents"])(

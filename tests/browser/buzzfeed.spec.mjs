@@ -114,7 +114,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(identitySearch).toHaveCount(0);
-  await appDock.getByRole("button", { name: "View all plugins" }).click();
+  await appDock.getByRole("button", { name: "Open Plugins" }).click();
   await expect(
     page.getByRole("dialog", { name: "Settings", exact: true }),
   ).toBeVisible();
@@ -348,10 +348,10 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
       page.getByRole("button", { name: "Search Buzz", exact: true }),
     ).toBeInViewport();
     await expect(
-      appDock.getByRole("button", { name: "View all plugins", exact: true }),
+      appDock.getByRole("button", { name: "Open Plugins", exact: true }),
     ).toBeInViewport();
     await appDock
-      .getByRole("button", { name: "View all plugins", exact: true })
+      .getByRole("button", { name: "Open Plugins", exact: true })
       .click({ trial: true });
     if (width <= 650)
       await page
@@ -504,11 +504,9 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
     document.documentElement.style.fontSize = "";
   });
   const dock = page.getByRole("navigation", { name: "Apps", exact: true });
-  await dock
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await dock.getByRole("button", { name: "Open Team", exact: true }).click();
   await expect(
-    dock.getByRole("button", { name: "View more team", exact: true }),
+    dock.getByRole("button", { name: "Open Team", exact: true }),
   ).toHaveAttribute("aria-current", "page");
   await dock.getByRole("button", { name: "Activity", exact: true }).click();
   await opener.click();
@@ -518,7 +516,7 @@ test("Activity is the landing page and opens a composer sheet over its feed", as
   await expect(page).not.toHaveURL(/channelId/);
   await page.goBack();
   await expect(
-    dock.getByRole("button", { name: "View more team", exact: true }),
+    dock.getByRole("button", { name: "Open Team", exact: true }),
   ).toHaveAttribute("aria-current", "page");
 });
 
@@ -530,9 +528,7 @@ test("Activity sheets use a light window-wide scrim above the rail and header", 
 }, testInfo) => {
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  await rail
-    .getByRole("button", { name: "View more team", exact: true })
-    .click();
+  await rail.getByRole("button", { name: "Open Team", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Team", exact: true }),
   ).toBeVisible();

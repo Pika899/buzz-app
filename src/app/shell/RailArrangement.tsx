@@ -560,9 +560,9 @@ export function RailGroup({
         {notes}
         {more && (
           <NavigationItem
-            label="View more"
+            label={`Open ${title}`}
             data-rail-view-more=""
-            aria-label={`View more ${title}`}
+            aria-label={`Open ${title}`}
             icon={<ArrowRightIcon size={18} />}
             selected={arrangement?.selectedSection === id}
             onClick={() => arrangement?.openSection(id)}

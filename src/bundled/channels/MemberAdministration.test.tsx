@@ -2382,3 +2382,35 @@ it.each(["owner", "admin"])(
     expect(t.publish).toHaveBeenCalledOnce();
   },
 );
+
+it("keeps an access filter visible and clearable after a failed refresh", async () => {
+  const t = await setup("admin", "member");
+  await vi.waitFor(() =>
+    expect(memberData()).toHaveAttribute("data-refreshing", "false"),
+  );
+  const filter = () => screen.getByRole("button", { name: /^Filter members:/ });
+  await t.user.click(filter());
+  await t.user.click(
+    await screen.findByRole("menuitemradio", { name: "Participating · 1" }),
+  );
+  expect(filter()).toHaveAccessibleName("Filter members: Participating");
+  const query = required(t.query.getMockImplementation());
+  t.query.mockImplementation(async (filters) => {
+    if (filters.some((filter) => filter.kinds?.includes(39002)))
+      throw new Error("Member reads offline");
+    return query(filters);
+  });
+  await act(async () => {
+    await t.session.memberAdministration.refresh(id);
+  });
+  expect(t.session.memberAdministration.snapshot(id).status).toBe("error");
+  expect(filter()).toHaveAccessibleName("Filter members: Participating");
+  expect(screen.getByText("Morgan")).toBeVisible();
+  expect(screen.queryByText("Carl (you)")).not.toBeInTheDocument();
+  await t.user.click(filter());
+  await t.user.click(
+    await screen.findByRole("menuitemradio", { name: "Any access · 3" }),
+  );
+  expect(filter()).toHaveAccessibleName("Filter members: All");
+  expect(screen.getByText("Carl (you)")).toBeVisible();
+});

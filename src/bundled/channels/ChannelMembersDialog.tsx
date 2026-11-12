@@ -1218,8 +1218,7 @@ export function ChannelMembersDialog({
   )
     setSelectedIdentity(identityFilter);
   const identityChoices = presentGroups.length > 1;
-  const accessChoices =
-    administration.status === "ready" && accessGroups.length > 1;
+  const accessChoices = rolesSettled && accessGroups.length > 1;
   const filterSummary =
     [identityFilter, accessFilter]
       .filter((name) => name !== "All")

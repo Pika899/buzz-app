@@ -16,10 +16,6 @@ import type { ExternalScope } from "./external-connection";
 import { externalMcpEnabled } from "./external-connection";
 import { connectMcp } from "../../buzz-mcp/connection";
 import { type HarnessKit, harnessKit } from "../agent-harness/kit";
-import {
-  INSTRUCTIONS_TEXT_LIMIT,
-  utf8Bytes,
-} from "../agent-harness/plugin-instructions";
 import { repositoriesContext } from "../communities/repositories";
 import type {
   HostMcpServer,
@@ -392,6 +388,10 @@ export type AgentInstructions = Readonly<{
    * each turn's prompt is built. A `when` that throws leaves out only these. */
   when?: (agent: Agent) => boolean;
 }>;
+/** Most UTF-8 bytes one `AgentInstructions` text may have, after trimming.
+ * It goes with every turn, so this matches a watch classifier's true/false
+ * text, not the once-a-session blocks such as agent instructions. */
+const INSTRUCTIONS_TEXT_LIMIT = 4 * 1024;
 /** Instructions for one turn, with the plugin that gave them. */
 export type TurnInstructions = Readonly<{ plugin: string; text: string }>;
 /** One of an agent's conversation sessions on this device. Without `root` it
@@ -2919,7 +2919,7 @@ export class AgentsService extends Service implements Agents {
       (when !== undefined && typeof when !== "function")
     )
       throw new Error("Agent instructions need an id and text");
-    if (utf8Bytes(text.trim()) > INSTRUCTIONS_TEXT_LIMIT)
+    if (new TextEncoder().encode(text.trim()).length > INSTRUCTIONS_TEXT_LIMIT)
       throw new Error(
         `Agent instructions are over ${INSTRUCTIONS_TEXT_LIMIT} bytes`,
       );

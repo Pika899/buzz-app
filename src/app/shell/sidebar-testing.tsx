@@ -198,6 +198,7 @@ export function fixture(
     snapshot: () => snapshot,
     subscribe,
     retry() {},
+    tryAgain() {},
     disconnect() {},
     async clearCache() {},
   };

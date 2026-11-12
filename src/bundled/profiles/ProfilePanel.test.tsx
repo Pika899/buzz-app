@@ -92,6 +92,7 @@ it("updates a mounted profile from the shared name view without replacing its id
     snapshot: () => snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     clearCache: async () => {},
   };
@@ -219,6 +220,7 @@ it("recovers provider-owned names in the same live session and releases demand w
     snapshot: () => snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     clearCache: async () => {},
   };
@@ -316,6 +318,7 @@ it("exposes thinking through the named profile avatar across tabs", async () => 
     snapshot: () => snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     clearCache: async () => {},
   };
@@ -429,6 +432,7 @@ function renderAgentActivity(
     snapshot: () => snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     clearCache: async () => {},
   };
@@ -1112,6 +1116,7 @@ it("shows historical verification time and issuer, discloses cache, and hides di
     snapshot: () => snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     clearCache: async () => {},
   };

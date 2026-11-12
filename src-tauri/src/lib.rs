@@ -63,6 +63,7 @@ mod keep_awake;
 #[cfg(target_os = "macos")]
 mod legacy_cli_shortcut;
 mod legacy_communities;
+mod local_skills;
 mod loopback;
 #[cfg(target_os = "macos")]
 mod media_context_menu;
@@ -82,6 +83,7 @@ mod window_controls;
 mod window_state;
 mod workspace_folder;
 use legacy_communities::legacy_communities;
+use local_skills::local_skills_list;
 use os_idle::get_os_idle_seconds;
 use repositories_folder::{repositories_folder_list, repositories_folder_validate};
 mod relaunch;
@@ -395,9 +397,13 @@ async fn plugin_import_git(
     authorization: Option<String>,
     check_only: Option<bool>,
     commit: Option<String>,
+    path: Option<String>,
 ) -> Result<Option<Preview>, String> {
     if let Some(commit) = &commit {
         buzzodz_plugins::imports::RequiredCommit::parse(commit)?;
+    }
+    if let Some(path) = &path {
+        buzzodz_plugins::imports::repository_folder(path)?;
     }
     let repository = buzzodz_plugins::imports::repository_url(&repository)?;
     let url = url::Url::parse(&repository).map_err(|_| "Invalid repository")?;
@@ -433,6 +439,7 @@ async fn plugin_import_git(
             buzzodz_plugins::imports::prepare_git_authorized(
                 &repository,
                 &reference,
+                path.as_deref(),
                 required,
                 authorization.as_deref(),
                 assertion
@@ -461,6 +468,7 @@ async fn plugin_import_git(
             buzzodz_plugins::imports::prepare_git_authorized(
                 &repository,
                 &reference,
+                path.as_deref(),
                 required,
                 authorization.as_deref(),
                 assertion
@@ -729,6 +737,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         federated_identity::federated_identity_snapshot,
         federated_identity::federated_identity_servers,
         federated_identity::federated_identity_requires,
+        federated_identity::federated_identity_ask_again,
         federated_identity::federated_identity_sign_in,
         federated_identity::federated_identity_cancel_sign_in,
         federated_identity::federated_identity_sign_out,
@@ -784,6 +793,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         workspace_pick_folder,
         repositories_folder_validate,
         repositories_folder_list,
+        local_skills_list,
         legacy_communities,
         plugin_import_folder,
         plugin_update_check,
@@ -859,6 +869,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         app_agents::app_agent_release,
         claude_key::claude_api_key_status,
         claude_key::claude_api_key_set,
+        claude_key::claude_api_key_clear,
         jev::jev_classifier_status,
         jev::jev_classifier_set_key,
         jev::jev_classifier_clear_key,
@@ -1441,6 +1452,7 @@ mod tests {
                 None,
                 Some(check_only),
                 None,
+                None,
             ))
             .err()
             .unwrap()
@@ -1460,10 +1472,32 @@ mod tests {
                 None,
                 Some(check_only),
                 Some(commit.into()),
+                None,
             ))
             .err()
             .unwrap()
         };
+        let folder = |path: &str, check_only| {
+            tauri::async_runtime::block_on(super::plugin_import_git(
+                app.state(),
+                app.state(),
+                app.state(),
+                app.state(),
+                "https://example.invalid/plugins".into(),
+                "main".into(),
+                None,
+                Some(check_only),
+                None,
+                Some(path.into()),
+            ))
+            .err()
+            .unwrap()
+        };
+        for path in ["/plugins", "plugins/../one", "plugins\\one", "plugins//one"] {
+            for check_only in [false, true] {
+                assert!(folder(path, check_only).contains("path"), "{path}");
+            }
+        }
         for commit in ["main", "abc123", &"a".repeat(41), &"g".repeat(40)] {
             for check_only in [false, true] {
                 assert!(

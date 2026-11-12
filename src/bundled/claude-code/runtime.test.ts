@@ -34,6 +34,7 @@ import { RESUMED_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import { ClaudeRuntime, config, DEFAULT_CONFIG, modelName } from "./runtime";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { AgentSessions, localSessions } from "./sessions";
+import { BASE_PROMPT } from "../../features/agent-harness/base-prompt";
 import { quoted } from "../../features/agent-harness/turn-records";
 import { wake } from "../../features/agent-harness/wakes";
 import { workspaceCanvas } from "../../features/solo/workspace";
@@ -821,6 +822,82 @@ it("ends a turn's prompt with the notes plugins left for it in its channel", asy
   expect(prompt).toMatch(/\n\n\(I interrupted your reply\)\n\n<attention>/);
   expect(notes).toHaveBeenCalledOnce();
   expect(notes).toHaveBeenCalledWith(channel, mention.id);
+});
+
+it("ends every turn's prompt with plugins' instructions, before the attention note", async () => {
+  const mention = message("2", "@Claude go on", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const { deliver, claudes, agent } = setup([mention]);
+  Object.assign(agent, {
+    instructions: () => [
+      { plugin: "acme.dibs", text: "Run dibs_check before a fix." },
+    ],
+  });
+  await deliver({ type: "mention", event: mention });
+  await flush(10);
+  const prompt =
+    claudes().find((process) => process.prompts.length)?.prompts[0] ?? "";
+  expect(prompt).toMatch(
+    /\n\n<plugin-instructions plugin="acme\.dibs">\nRun dibs_check before a fix\.\n<\/plugin-instructions>\n\n<attention>/,
+  );
+});
+
+it("gives each turn of a kept session the plugins' instructions as they are now", async () => {
+  // Replies in one thread, so one session takes all three turns.
+  const mention = (id: string) =>
+    message(id, "@Claude go on", {
+      created_at: 100 + Number(id),
+      tags: [
+        ["h", channel],
+        ["p", self],
+        ...(id === "1" ? [] : [["e", "1".repeat(64), "", "reply"]]),
+      ],
+    });
+  const { deliver, claudes, agent } = setup([mention("1")]);
+  let current = [{ plugin: "acme.dibs", text: "Run dibs_check first." }];
+  Object.assign(agent, { instructions: () => current });
+  await deliver({ type: "mention", event: mention("1") });
+  await flush(10);
+  // Changed: the session is kept and its next turn has only the new text.
+  current = [{ plugin: "acme.dibs", text: "Run dibs_watch first." }];
+  await deliver({ type: "mention", event: mention("2") });
+  await flush(10);
+  // Removed: the next turn has no section, which the base prompt says
+  // means none apply now.
+  current = [];
+  await deliver({ type: "mention", event: mention("3") });
+  await flush(10);
+  const used = claudes().filter((process) => process.prompts.length);
+  expect(used).toHaveLength(1);
+  const [first, second, third] = used[0]?.prompts ?? [];
+  expect(first).toContain("Run dibs_check first.");
+  expect(second).toContain("Run dibs_watch first.");
+  expect(second).not.toContain("Run dibs_check first.");
+  expect(third).not.toContain("<plugin-instructions");
+  expect(BASE_PROMPT).toContain(
+    "a turn without any means no plugin instructions apply now",
+  );
+});
+
+it("gives a timer's one-off turn plugins' instructions once", async () => {
+  const { deliver, claudes, agent } = setup();
+  Object.assign(agent, {
+    instructions: () => [
+      { plugin: "acme.dibs", text: "Run dibs_check before a fix." },
+    ],
+  });
+  await deliver(timer("daily", "ops"));
+  await flush(10);
+  const prompt =
+    claudes().find((process) => process.prompts.length)?.prompts[0] ?? "";
+  expect(
+    prompt.match(/<plugin-instructions plugin="acme\.dibs">/g),
+  ).toHaveLength(1);
+  expect(prompt).toMatch(/<\/plugin-instructions>\n\n<attention>/);
 });
 
 it("keeps the notes of a turn Claude never started for the next, ahead of newer ones", async () => {
@@ -3056,6 +3133,35 @@ it("grants a listed folder its owner referenced by chip for the rest of the conv
     runtime.dispose();
     native.invoke.mockReset();
     vi.unstubAllGlobals();
+  }
+});
+
+it("names a skill its owner chose for this agent by chip, never one chosen for another agent", async () => {
+  const skill = "/example/.claude/skills/review/SKILL.md";
+  const mention = (id: string, target: string) =>
+    message(id, "@Claude review", {
+      tags: [
+        ["h", channel],
+        ["p", self],
+        ...messageTokenTags([
+          { kind: "skill", id: skill, label: "review", target },
+        ]),
+      ],
+    });
+  const { deliver, claudes, runtime } = setup([], {
+    solo: new Set([channel]),
+  });
+  try {
+    await deliver({ type: "mention", event: mention("2", "f".repeat(64)) });
+    await flush(10);
+    const process = claudes().find((item) => item.prompts.length);
+    expect(process?.prompts[0]).not.toContain("<referenced-skills>");
+    await deliver({ type: "mention", event: mention("3", self) });
+    await flush(10);
+    expect(process?.prompts[1]).toContain("<referenced-skills>");
+    expect(process?.prompts[1]).toContain(JSON.stringify(skill));
+  } finally {
+    runtime.dispose();
   }
 });
 

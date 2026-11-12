@@ -56,6 +56,7 @@ import {
   composerTokenText,
   type ComposerToken,
 } from "./composer-token";
+import { ComposerSkillChip } from "./ComposerSkillChip";
 import {
   activeBlockFormats,
   apply,
@@ -609,13 +610,27 @@ export function EditableInput({
         const tr = state.tr;
         // Only adopt newly recognized tokens. Never rebuild editable text from
         // Markdown here: that would discard stored marks/whitespace on each key.
+        // A restored presentation token takes its renderer's editing mode.
         for (const item of [...decorations].reverse()) {
-          if (
-            next.tokens.some(
-              (token) => token.start === item.start && token.end === item.end,
+          const existing = next.tokens.find(
+            (token) => token.start === item.start && token.end === item.end,
+          );
+          if (existing) {
+            const { attrs } = existing.node;
+            if (
+              attrs.editAsText !== !!item.editAsText &&
+              !attrs.recipient &&
+              !attrs.resource &&
+              !attrs.semantic &&
+              !attrs.pending
             )
-          )
+              tr.setNodeAttribute(
+                existing.from,
+                "editAsText",
+                !!item.editAsText,
+              );
             continue;
+          }
           const from = next.position(item.start),
             to = next.position(item.end, -1);
           if (next.source(from) !== item.start || next.source(to) !== item.end)
@@ -1892,6 +1907,10 @@ export function EditableInput({
             return {
               dom,
               ignoreMutation: () => true,
+              // A chip's own control keeps its pointer and keys.
+              stopEvent: (event) =>
+                event.target instanceof Element &&
+                !!event.target.closest("button"),
               destroy() {
                 hosts.current.delete(dom);
                 tokenViews();
@@ -2561,6 +2580,21 @@ export function EditableInput({
     const editor = view.current;
     if (editor?.hasFocus()) editor.dispatch(editor.state.tr.scrollIntoView());
   });
+  // Closing a chip's details returns the caret to right after the chip.
+  const caretAfter = (position: () => number | undefined) => {
+    const editor = view.current;
+    const pos = position();
+    const node = pos === undefined ? null : editor?.state.doc.nodeAt(pos);
+    if (!editor?.editable || pos === undefined || node?.type.name !== "token")
+      return false;
+    editor.dispatch(
+      editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, pos + node.nodeSize),
+      ),
+    );
+    editor.focus();
+    return true;
+  };
   return (
     <>
       {/* biome-ignore lint/a11y/useSemanticElements: ProseMirror owns this native editing surface. */}
@@ -2644,7 +2678,12 @@ export function EditableInput({
         );
         return createPortal(
           // Host-owned artwork: restore never depends on the providing plugin.
-          host.semantic ? (
+          host.semantic?.kind === "skill" ? (
+            <ComposerSkillChip
+              token={host.semantic}
+              returnCaret={() => caretAfter(host.position)}
+            />
+          ) : host.semantic ? (
             <span
               data-buzz-ui=""
               className="inline-chip"

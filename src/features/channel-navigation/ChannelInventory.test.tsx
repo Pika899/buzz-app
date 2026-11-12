@@ -206,6 +206,7 @@ function fixture(
       return () => connectionListeners.delete(listener);
     },
     retry() {},
+    tryAgain() {},
     disconnect() {},
     async clearCache() {},
   } satisfies RelayData;
@@ -2420,6 +2421,7 @@ it("promotes exactly the Bestie DM, restores prior local removal, and releases i
     snapshot: () => h.snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     async clearCache() {},
   };

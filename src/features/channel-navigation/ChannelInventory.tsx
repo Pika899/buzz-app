@@ -1643,7 +1643,7 @@ export function ChannelInventory({
         {cached && connectionError && (
           <p className={styles.preferenceNotice} role="status">
             Offline · Showing saved conversations.
-            <Button onClick={relay.retry}>Retry connection</Button>
+            <Button onClick={relay.tryAgain}>Retry connection</Button>
           </p>
         )}
         {preferences.sortErrors?.map(({ group, mode, error }) => (

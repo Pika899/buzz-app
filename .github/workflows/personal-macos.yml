@@ -13,7 +13,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  javascript:
+    name: Check shared JavaScript behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      BUZZ_TEST_WORKERS: "2"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Check formatting, types and design contracts
+        run: ./bin/pnpm check
+      - name: Test authentication, agents and profile read contracts
+        run: ./bin/pnpm exec vitest run src/bundled/claude-code src/features/agents src/features/relay/session-snapshot-read.test.ts
   build:
+    needs: javascript
     name: Test and build Apple Silicon app
     runs-on: macos-15-intel
     timeout-minutes: 120
@@ -75,10 +92,8 @@ jobs:
         with:
           key: personal-macos-intel-to-arm64
           cache-on-failure: true
-      - name: Check formatting, types and design contracts
-        run: pnpm check
-      - name: Test authentication and agent configuration
-        run: pnpm exec vitest run src/bundled/claude-code src/features/agents src/features/relay/session-snapshot-read.test.ts
+      - name: Test deletion recovery on macOS
+        run: pnpm exec vitest run src/features/agents/service.test.ts -t "finishes deleting an interrupted creation|keeps the key and row when archives are unknown|names record cleanup"
       - name: Configure personal build without official updater
         run: |
           node --input-type=module <<'JS'

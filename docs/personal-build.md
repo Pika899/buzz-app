@@ -7,6 +7,11 @@ public subscription sign-in patch from block/buzz-app PR #2995, snapshot
 This build also prevents a cancelled existing-account probe from saving an
 authentication change; a focused regression test covers that cancellation.
 
+Ordinary direct messages to Claude now request answers in the main conversation,
+matching the DM send default. Messages explicitly sent inside an existing thread
+continue that thread. This changes future answers; it does not move or rewrite
+older replies already stored in threads.
+
 The GitHub-hosted macOS runner builds for Apple Silicon. No personal Claude,
 ChatGPT, Buzz credentials or Apple signing credentials are uploaded. Login is
 tested only on the destination Mac. Automated tests use fixtures, not accounts.
@@ -28,7 +33,10 @@ manual approval for this newly signed application.
 3. In Settings > Agent setup > Harness defaults > Claude, choose Edit
    configuration, then Use Claude account or Sign in. A previously saved API key
    wins until you select the Claude account. There is no need to delete the key.
-4. Verify that Claude shows the subscription account and answers a small prompt.
+4. Verify that Claude shows the subscription account. Start a new session for
+   the direct conversation, then send a small prompt from its main composer:
+   Claude should answer in the main chat. Send a follow-up inside an explicit
+   thread and verify that answer stays in that thread.
 5. Verify that the existing Codex agent still answers through its ChatGPT login.
 6. Quit and reopen; verify the account choice persists.
 

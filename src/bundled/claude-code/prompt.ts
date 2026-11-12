@@ -119,17 +119,19 @@ export function turnPrompt(input: TurnInput) {
   const channelLabel = channel.name
     ? `${quoted(channel.name.replace(/\s+/g, " ")).slice(1, -1)} (#${channel.id})`
     : channel.id;
-  // A session shared by a channel's threads (or a DM's) cannot tell which
-  // thread a reply is for, so it names the thread itself.
+  // Shared sessions name an existing thread explicitly. A new DM message
+  // stays in the main conversation rather than opening a thread per turn.
   const root = thread?.rootId ?? event.id;
   const shared = channel.dm || input.scope === "channel";
   const reply = input.topLevel
     ? `IMPORTANT: ${input.channelLevel ? CHANNEL_LEVEL_PROMPT : TOP_LEVEL_PROMPT}`
-    : shared
-      ? `IMPORTANT: For ordinary replies in this turn, pass \`reply: "${root}"\` to \`send\` so the conversation stays threaded. Do NOT reply into any other (older) thread. If the human explicitly asks for a channel-root, top-level, or broadcast post, leave out \`reply\`.`
-      : thread
-        ? "IMPORTANT: `send` replies in this thread by default, so the conversation stays threaded. If the human explicitly asks for a channel-root, top-level, or broadcast post, pass `channel`. If the requested destination is ambiguous, ask before sending."
-        : "IMPORTANT: This is a new top-level message. `send` replies in its thread by default — the triggering message is the thread root. Do NOT reply into any other (older) thread. If the human explicitly asks for a channel-root, top-level, or broadcast post, pass `channel`.";
+    : channel.dm && !thread
+      ? "IMPORTANT: This is a direct message at the conversation's top level. For ordinary replies, use `send` without `reply` so your answer appears in the main chat. Start a thread only when the human explicitly asks for one."
+      : shared
+        ? `IMPORTANT: For ordinary replies in this turn, pass \`reply: "${root}"\` to \`send\` so the conversation stays threaded. Do NOT reply into any other (older) thread. If the human explicitly asks for a channel-root, top-level, or broadcast post, leave out \`reply\`.`
+        : thread
+          ? "IMPORTANT: `send` replies in this thread by default, so the conversation stays threaded. If the human explicitly asks for a channel-root, top-level, or broadcast post, pass `channel`. If the requested destination is ambiguous, ask before sending."
+          : "IMPORTANT: This is a new top-level message. `send` replies in its thread by default — the triggering message is the thread root. Do NOT reply into any other (older) thread. If the human explicitly asks for a channel-root, top-level, or broadcast post, pass `channel`.";
   const fetch = input.topLevel
     ? "Use `read` for recent messages if needed."
     : shared

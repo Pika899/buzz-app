@@ -364,10 +364,23 @@ it("says earlier context is already in the session when none is new", () => {
   expect(prompt).toContain(
     "Earlier context is already available in this session.",
   );
-  // A DM's session spans its threads, so it names the one to reply in.
-  expect(prompt).toContain(
-    `pass \`reply: "${event("3", "").id}"\` to \`send\``,
-  );
+  expect(prompt).toContain("For ordinary replies, use `send` without `reply`");
+  expect(prompt).not.toContain(`pass \`reply: "${event("3", "").id}"`);
+});
+
+it("continues an explicitly threaded DM in its own thread", () => {
+  const root = event("1", "A topic");
+  const prompt = turnPrompt({
+    agent,
+    event: event("3", "Continue here"),
+    channel: { id: "dm", dm: true },
+    scope: "channel",
+    thread: { rootId: root.id, parentId: root.id },
+    context: [root],
+    total: 2,
+  });
+  expect(prompt).toContain(`pass \`reply: "${root.id}"\` to \`send\``);
+  expect(prompt).not.toContain("your answer appears in the main chat");
 });
 
 it("shows a DM's recent messages as conversation context", () => {

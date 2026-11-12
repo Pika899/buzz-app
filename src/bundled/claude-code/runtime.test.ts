@@ -72,6 +72,8 @@ function setup(
     signal?: AbortSignal;
     /** Channels that are the owner's own Solo chats; the owner is the viewer. */
     solo?: Set<string>;
+    /** An ordinary direct conversation, which may also contain threads. */
+    dm?: boolean;
     /** Solo chats the owner's device is still creating. */
     pending?: Set<string>;
     named?: Delivery["named"];
@@ -159,7 +161,11 @@ function setup(
           {
             id: channel,
             name: "general",
-            channelType: options.solo?.has(channel) ? "solo" : "stream",
+            channelType: options.dm
+              ? "dm"
+              : options.solo?.has(channel)
+                ? "solo"
+                : "stream",
             members: [],
             ...(options.pending?.has(channel) ? { pending: true } : {}),
           },
@@ -2573,6 +2579,46 @@ async function send(claude: FakeClaude | undefined, id: string, args: object) {
     )?.response as { response?: { mcp_response?: { result?: unknown } } }
   )?.response?.mcp_response?.result;
 }
+
+it("posts ordinary DM answers in the main chat and preserves explicit thread replies", async () => {
+  const first = message("1", "What can you do?");
+  const f = setup([first], { dm: true, hold: true });
+  f.agent.query.mockImplementation(async () => [first]);
+  await f.deliver({ type: "mention", event: first });
+  await flush(10);
+  const claude = f.claudes().find((process) => process.prompts.length);
+  expect(claude?.prompts[0]).toContain(
+    "For ordinary replies, use `send` without `reply`",
+  );
+  await send(claude, "dm-main", { text: "Main chat answer" });
+  expect(f.published.at(-1)).toMatchObject({
+    content: "Main chat answer",
+    tags: [["h", channel]],
+  });
+  const followup = message("2", "More in this thread", {
+    created_at: 110,
+    tags: [
+      ["h", channel],
+      ["e", first.id, "", "reply"],
+    ],
+  });
+  await f.deliver({ type: "mention", event: followup });
+  await flush(10);
+  expect(claude?.prompts.at(-1)).toContain(
+    `pass \`reply: "${first.id}"\` to \`send\``,
+  );
+  await send(claude, "dm-thread", {
+    text: "Thread answer",
+    reply: first.id,
+  });
+  expect(f.published.at(-1)).toMatchObject({
+    content: "Thread answer",
+    tags: [
+      ["h", channel],
+      ["e", first.id, "", "reply"],
+    ],
+  });
+});
 
 it("continues an owner's Solo chat as one channel session posted at the top level", async () => {
   const earlier = message("1", "Earlier in the chat");

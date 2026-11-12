@@ -11,10 +11,6 @@ Watch the full-quality video at [buzz.xyz](https://buzz.xyz/#demo).
 
 ![A Buzz chat with an agent replying](docs/assets/readme/solo-chat.png)
 
-> [!IMPORTANT]
-> **Buzz 1.0 is in beta.** Buzz 0.X is still available and supported in
-> [block/buzz](https://github.com/block/buzz).
-
 ## Get started
 
 ### 1. Download

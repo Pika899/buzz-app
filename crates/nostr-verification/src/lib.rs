@@ -3,6 +3,12 @@
 //! Batching uses the BIP-340 equation over RustCrypto's k256 arithmetic; small
 //! or diverse batches and failed batches use individual libsecp256k1 checks.
 
+// Batch accumulation adapted from Zcash Foundation's frost-core/src/batch.rs,
+// revision 2016e44ba4a4757a996300350063b937a2ad33e8.
+// Copyright 2019-2021 Zcash Foundation. SPDX-License-Identifier: Apache-2.0
+// Modified for BIP-340 transcript coefficients, repeated authors, and k256 0.14.
+// See the root NOTICE.md for the upstream source and license.
+
 use k256::{
     elliptic_curve::{
         ops::{LinearCombination, Reduce},
@@ -101,13 +107,72 @@ impl Decoded {
             sig: decode(&claim.sig)?,
         })
     }
+
+    // Like FROST's Item::new, prepare the signature and challenge before
+    // accumulating its weighted equation. Nostr uses x-only, even-Y points.
+    fn prepare(&self, challenge: &Sha256) -> Option<BatchItem> {
+        let (r, s) = self.sig.split_at(32);
+        let nonce = AffinePoint::decompact(&FieldBytes::try_from(r).ok()?).into_option()?;
+        let response = Scalar::from_repr(FieldBytes::try_from(s).ok()?).into_option()?;
+        let mut hash = challenge.clone();
+        hash.update(r);
+        hash.update(self.pubkey);
+        hash.update(self.id);
+        let challenge = FieldBytes::from(<[u8; 32]>::from(hash.finalize()));
+        Some(BatchItem {
+            nonce: nonce.into(),
+            response,
+            challenge: <Scalar as Reduce<FieldBytes>>::reduce(&challenge),
+        })
+    }
+}
+
+struct BatchItem {
+    nonce: ProjectivePoint,
+    response: Scalar,
+    challenge: Scalar,
 }
 
 fn batch_valid(claims: &[Decoded]) -> bool {
-    // BIP-340 Batch Verification: seed a CSPRNG with a hash of ALL inputs.
-    // All fields have fixed lengths, so this transcript is unambiguous. Binding
-    // signatures too prevents adversaries from choosing cancelling errors after
-    // learning the weights. Never replace these coefficients with fixed weights.
+    let mut rng = batch_rng(claims);
+    let tag = Sha256::digest(b"BIP0340/challenge");
+    let mut challenge = Sha256::new();
+    challenge.update(tag);
+    challenge.update(tag);
+    let mut terms = Vec::with_capacity(claims.len() * 2 + 1);
+    let mut authors = BTreeMap::<[u8; 32], Scalar>::new();
+    let mut generator_coefficient = Scalar::ZERO;
+    // FROST's weighted equation: -sum(z*s)G + sum(z*R) + sum(z*c*P) = 0.
+    // secp256k1 has cofactor 1. Combine P terms belonging to the same author.
+    for (index, claim) in claims.iter().enumerate() {
+        let Some(item) = claim.prepare(&challenge) else {
+            return false;
+        };
+        let blind = if index == 0 {
+            Scalar::ONE
+        } else {
+            coefficient(&mut rng)
+        };
+        generator_coefficient -= blind * item.response;
+        terms.push((item.nonce, blind));
+        *authors.entry(claim.pubkey).or_insert(Scalar::ZERO) += blind * item.challenge;
+    }
+    for (pubkey, coefficient) in authors {
+        // Validate the key even when its combined coefficient is zero.
+        let Some(point) = AffinePoint::decompact(&FieldBytes::from(pubkey)).into_option() else {
+            return false;
+        };
+        terms.push((ProjectivePoint::from(point), coefficient));
+    }
+    terms.push((ProjectivePoint::GENERATOR, generator_coefficient));
+    // Variable-time arithmetic only processes public signature material.
+    ProjectivePoint::lincomb_vartime(terms.as_slice()) == ProjectivePoint::IDENTITY
+}
+
+fn batch_rng(claims: &[Decoded]) -> ChaCha20Rng {
+    // BIP-340 permits a CSPRNG seeded by a hash of ALL batch inputs instead of
+    // FROST's external RNG. Fixed-length fields make the transcript unambiguous.
+    // Signatures must be bound too, so forged errors cannot cancel known weights.
     let mut transcript = Sha256::new();
     for claim in claims {
         transcript.update(claim.pubkey);
@@ -118,51 +183,7 @@ fn batch_valid(claims: &[Decoded]) -> bool {
     for claim in claims {
         transcript.update(claim.sig);
     }
-    let mut rng = ChaCha20Rng::from_seed(transcript.finalize().into());
-    let tag = Sha256::digest(b"BIP0340/challenge");
-    let mut challenge = Sha256::new();
-    challenge.update(tag);
-    challenge.update(tag);
-    let mut terms = Vec::with_capacity(claims.len() * 2 + 1);
-    let mut authors = BTreeMap::<[u8; 32], Scalar>::new();
-    let mut sum = Scalar::ZERO;
-    for (index, claim) in claims.iter().enumerate() {
-        let mut r = FieldBytes::default();
-        r.copy_from_slice(&claim.sig[..32]);
-        let Some(point) = AffinePoint::decompact(&r).into_option() else {
-            return false;
-        };
-        let mut s = FieldBytes::default();
-        s.copy_from_slice(&claim.sig[32..]);
-        let Some(s) = Scalar::from_repr(s).into_option() else {
-            return false;
-        };
-        let mut hash = challenge.clone();
-        hash.update(r);
-        hash.update(claim.pubkey);
-        hash.update(claim.id);
-        let e = <Scalar as Reduce<FieldBytes>>::reduce(&FieldBytes::from(<[u8; 32]>::from(
-            hash.finalize(),
-        )));
-        let a = if index == 0 {
-            Scalar::ONE
-        } else {
-            coefficient(&mut rng)
-        };
-        sum += a * s;
-        terms.push((ProjectivePoint::from(point), -a));
-        *authors.entry(claim.pubkey).or_insert(Scalar::ZERO) -= a * e;
-    }
-    for (pubkey, coefficient) in authors {
-        // Validate the key even when its combined coefficient is zero.
-        let Some(point) = AffinePoint::decompact(&FieldBytes::from(pubkey)).into_option() else {
-            return false;
-        };
-        terms.push((ProjectivePoint::from(point), coefficient));
-    }
-    terms.push((ProjectivePoint::GENERATOR, sum));
-    // Variable-time arithmetic only processes public signature material.
-    ProjectivePoint::lincomb_vartime(terms.as_slice()) == ProjectivePoint::IDENTITY
+    ChaCha20Rng::from_seed(transcript.finalize().into())
 }
 
 fn coefficient(rng: &mut ChaCha20Rng) -> Scalar {

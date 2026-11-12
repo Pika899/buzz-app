@@ -15,7 +15,12 @@ performance thresholds, not security assumptions: both paths must reject invalid
 claims. The threshold comes from local Apple Silicon measurements and should be
 remeasured on other supported architectures before claiming a speedup there.
 
-The batch path follows [BIP-340's batch verification algorithm](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki#batch-verification).
+The batch equation accumulation is adapted from Zcash Foundation FROST's
+`frost-core/src/batch.rs`; [NOTICE.md](../../NOTICE.md) pins the source and license.
+Signature preparation is separate from weighted equation accumulation, as in
+FROST. The local adaptation combines repeated-author terms and uses
+[BIP-340's batch verification coefficients](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki#batch-verification)
+instead of an external random source. It adds no FROST dependency.
 It hashes every public key, message (the 32-byte event ID), and signature into a
 ChaCha20 seed. The first coefficient is one; later coefficients are sampled by
 rejection from the nonzero scalars below the curve order. This binds the weights

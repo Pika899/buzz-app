@@ -2,17 +2,13 @@ import type { OutboxRecovery, OutboxStorage, OutgoingEvent } from "./outbox";
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("buzz-outbox-v2", 3);
+    const request = indexedDB.open("buzz-outbox-v2", 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("partitions"))
         db.createObjectStore("partitions");
       if (!db.objectStoreNames.contains("events"))
         db.createObjectStore("events", {
-          keyPath: ["scope", "id"],
-        }).createIndex("scope", "scope");
-      if (!db.objectStoreNames.contains("retirements"))
-        db.createObjectStore("retirements", {
           keyPath: ["scope", "id"],
         }).createIndex("scope", "scope");
     };
@@ -26,6 +22,12 @@ function openDatabase() {
   });
 }
 
+// Legacy partition records use string keys. Array keys keep cleanup markers
+// separate without changing the database version or saved event format.
+function retirementRange(scope: string) {
+  return IDBKeyRange.bound([scope], [scope, []]);
+}
+
 /** Drops one partition's journal, including its legacy record, after that
  * community's session is disposed: nothing left there can still be delivered. */
 export async function purgeOutboxStorage(scope: string) {
@@ -34,24 +36,18 @@ export async function purgeOutboxStorage(scope: string) {
   const db = await openDatabase();
   try {
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(
-        ["events", "partitions", "retirements"],
-        "readwrite",
-        {
-          durability: "strict",
-        },
-      );
+      const tx = db.transaction(["events", "partitions"], "readwrite", {
+        durability: "strict",
+      });
       const events = tx.objectStore("events");
       const keys = events.index("scope").getAllKeys(IDBKeyRange.only(scope));
       keys.onsuccess = () => {
         for (const key of keys.result) events.delete(key);
       };
-      const retirements = tx.objectStore("retirements");
-      const retiredKeys = retirements
-        .index("scope")
-        .getAllKeys(IDBKeyRange.only(scope));
+      const partitions = tx.objectStore("partitions");
+      const retiredKeys = partitions.getAllKeys(retirementRange(scope));
       retiredKeys.onsuccess = () => {
-        for (const key of retiredKeys.result) retirements.delete(key);
+        for (const key of retiredKeys.result) partitions.delete(key);
       };
       tx.objectStore("partitions").delete(scope);
       tx.oncomplete = () => resolve();
@@ -82,17 +78,13 @@ export function browserOutboxStorage(scope: string): OutboxStorage {
     async retire(id, recovery) {
       const db = await open();
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(
-          ["events", "retirements", "partitions"],
-          "readwrite",
-          {
-            durability: "strict",
-          },
-        );
+        const tx = db.transaction(["events", "partitions"], "readwrite", {
+          durability: "strict",
+        });
         const events = tx.objectStore("events");
-        const retirements = tx.objectStore("retirements");
+        const partitions = tx.objectStore("partitions");
         const record = events.get([scope, id]);
-        const marker = retirements.get([scope, id]);
+        const marker = partitions.get([scope, id]);
         const legacy = tx.objectStore("partitions").get(scope);
         legacy.onsuccess = () => {
           let rows: readonly OutgoingEvent[];
@@ -112,7 +104,7 @@ export function browserOutboxStorage(scope: string): OutboxStorage {
           const item: OutgoingEvent | undefined =
             record.result?.operation ?? rows.find((row) => row.event.id === id);
           const expected: OutboxRecovery | undefined =
-            marker.result?.recovery ?? item?.recovery;
+            marker.result ?? item?.recovery;
           if (
             (item && !item.guarded) ||
             (expected &&
@@ -124,7 +116,7 @@ export function browserOutboxStorage(scope: string): OutboxStorage {
             tx.abort();
             return;
           }
-          retirements.put({ scope, id, recovery });
+          partitions.put(recovery, [scope, id]);
           events.delete([scope, id]);
         };
         tx.oncomplete = () => {
@@ -141,16 +133,15 @@ export function browserOutboxStorage(scope: string): OutboxStorage {
       let migrated = false;
       const records = await new Promise<readonly OutgoingEvent[]>(
         (resolve, reject) => {
-          const tx = db.transaction(["events", "partitions", "retirements"]);
+          const tx = db.transaction(["events", "partitions"]);
           const entries = tx
             .objectStore("events")
             .index("scope")
             .getAll(IDBKeyRange.only(scope));
           const legacy = tx.objectStore("partitions").get(scope);
           const retired = tx
-            .objectStore("retirements")
-            .index("scope")
-            .getAllKeys(IDBKeyRange.only(scope));
+            .objectStore("partitions")
+            .getAllKeys(retirementRange(scope));
           tx.oncomplete = () => {
             try {
               migrated = legacy.result === true;
@@ -189,15 +180,11 @@ export function browserOutboxStorage(scope: string): OutboxStorage {
       const db = await open();
       const next = new Map(operations.map((item) => [item.event.id, item]));
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(
-          ["events", "partitions", "retirements"],
-          "readwrite",
-          {
-            durability: "strict",
-          },
-        );
+        const tx = db.transaction(["events", "partitions"], "readwrite", {
+          durability: "strict",
+        });
         const events = tx.objectStore("events");
-        const retirements = tx.objectStore("retirements");
+        const partitions = tx.objectStore("partitions");
         for (const [id, operation] of next) {
           const old = persisted.get(id);
           if (
@@ -213,7 +200,7 @@ export function browserOutboxStorage(scope: string): OutboxStorage {
             old.guarded === operation.guarded
           )
             continue;
-          const retired = retirements.get([scope, id]);
+          const retired = partitions.get([scope, id]);
           retired.onsuccess = () => {
             if (retired.result) next.delete(id);
             else events.put({ scope, id, operation });

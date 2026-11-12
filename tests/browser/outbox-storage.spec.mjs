@@ -81,7 +81,7 @@ for (const initialSave of ["before-retirement", "after-retirement"])
             await store.save([...restored, old]);
             await isolated.save([old]);
             const durable = await new Promise((resolve, reject) => {
-              const request = indexedDB.open("buzz-outbox-v2", 3);
+              const request = indexedDB.open("buzz-outbox-v2", 2);
               request.onerror = () => reject(request.error);
               request.onsuccess = () => {
                 const db = request.result;
@@ -214,7 +214,7 @@ test("retirement checks recovery identity and guard before durable removal", asy
   });
 });
 
-test("retirement preserves a version 2 journal and excludes legacy rows", async ({
+test("retirement keeps a version 2 connection usable and excludes legacy rows", async ({
   page,
   context,
   sourceOrigin,
@@ -254,7 +254,11 @@ test("retirement preserves a version 2 journal and excludes legacy rows", async 
       tx.oncomplete = resolve;
       tx.onabort = () => reject(tx.error);
     });
-    db.close();
+    let versionChanged = false;
+    db.onversionchange = () => {
+      versionChanged = true;
+      db.close();
+    };
     localStorage.setItem(
       `buzz-outbox-v1:${scope}-legacy`,
       JSON.stringify([old, other]),
@@ -266,21 +270,44 @@ test("retirement preserves a version 2 journal and excludes legacy rows", async 
     const legacy = browserOutboxStorage(`${scope}-legacy`);
     try {
       const migrated = (await store.load()).map((row) => row.event.id);
+      await store.retire("old", recovery);
+      await store.save([old, other]);
       await legacy.retire("old", recovery);
       const rows = await legacy.load();
       await legacy.save(rows);
+      const legacyRead = await new Promise((resolve, reject) => {
+        const tx = db.transaction(["events", "partitions"]);
+        const records = tx.objectStore("events").index("scope").getAll(scope);
+        const partition = tx.objectStore("partitions").get(scope);
+        tx.oncomplete = () =>
+          resolve({
+            ids: records.result.map((row) => row.operation.event.id),
+            migrated: partition.result,
+          });
+        tx.onabort = () => reject(tx.error);
+      });
       return {
         migrated,
         legacy: (await legacy.load()).map((row) => row.event.id),
+        version: db.version,
+        versionChanged,
+        legacyRead,
       };
     } finally {
+      db.close();
       store.close();
       legacy.close();
       await purgeOutboxStorage(scope);
       await purgeOutboxStorage(`${scope}-legacy`);
     }
   });
-  expect(result).toEqual({ migrated: ["other"], legacy: ["other"] });
+  expect(result).toEqual({
+    migrated: ["other"],
+    legacy: ["other"],
+    version: 2,
+    versionChanged: false,
+    legacyRead: { ids: ["other"], migrated: true },
+  });
 });
 
 // Exercise the actual incremental IndexedDB journal: a full-array memory store

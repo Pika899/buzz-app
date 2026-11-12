@@ -556,9 +556,11 @@ relay read or background timer. Existing send, retry, adoption and dismissal
 locks keep their current behavior.
 
 Plugins that support older hosts must check that `outbox.retire` is a function
-before use. If it is absent, retain the cleanup intent. The host's browser
-journal uses database version 3. A downgrade cannot open that journal; do not
-delete saved intent to bypass the version check.
+before use. If it is absent, retain the cleanup intent. The browser journal keeps database
+version 2 and the existing event format. Cleanup markers use separate keys in
+the existing partition metadata store. Older hosts can open the journal, but
+their saves do not enforce cleanup markers. Callers must not rely on retirement
+to block delivery from an older host.
 
 ## Bounds and lifecycle
 

@@ -723,9 +723,7 @@ export class ClaudeRuntime {
   }
   private readonly controls = new SessionControls(() => this.notify());
   private controlKey(agent: Agent, place: SessionPlace) {
-    return (config(agent.config).scope === "channel" &&
-      place.sessionScope !== "thread") ||
-      !place.root
+    return config(agent.config).scope === "channel" || !place.root
       ? place.channelId
       : `${place.channelId}/${place.root}`;
   }
@@ -932,38 +930,36 @@ export class ClaudeRuntime {
     const solo =
       (await this.reads(agent.key)?.soloChat(agent.owner, channel, signal)) ??
       false;
-    let topLevel = solo || wake?.topLevel === true;
+    const topLevel = solo || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
-    let { key, source } = await this.key(
+    const { key, source } = await this.key(
       entry,
       agent,
       event,
       channel,
       topLevel,
     );
-    const defaultKey = key;
-    const selected = await delivery.prepareSession?.({
-      source: wake
-        ? {
+    const admission = (deferred: boolean) =>
+      delivery.prepareSession?.(
+        {
+          source: wake
+            ? {
+                channelId: channel,
+                ...(source.root && wake.root ? { root: wake.root } : {}),
+              }
+            : source,
+          conversation: {
             channelId: channel,
-            ...(source.root && wake.root ? { root: wake.root } : {}),
-          }
-        : source,
-      conversation: {
-        channelId: channel,
-        ...(key !== channel
-          ? { root: threadReference(event)?.rootId ?? event.id }
-          : {}),
-      },
-    });
-    if (selected) {
-      key = selected.conversation.root
-        ? `${channel}/${selected.conversation.root}`
-        : channel;
-      if (selected.conversation.root) topLevel = false;
-    }
+            ...(key !== channel
+              ? { root: threadReference(event)?.rootId ?? event.id }
+              : {}),
+          },
+        },
+        deferred,
+      );
+
     let session = delivery.session;
     let sessionContext = delivery.sessionContext;
     signal.throwIfAborted();
@@ -972,9 +968,7 @@ export class ClaudeRuntime {
         `${agent.key}/${key}`,
         async (deferred) => {
           if (this.agents.get(agent.key) !== entry) return;
-          const admitted = await selected?.prepare(deferred);
-          if (selected && !admitted && key !== defaultKey)
-            return selected.continueDefault(delivery, deferred);
+          const admitted = await admission(deferred);
           session = admitted?.session ?? session;
           sessionContext = admitted?.context ?? sessionContext;
 
@@ -1007,9 +1001,7 @@ export class ClaudeRuntime {
         // the short deadline for handing a message to the harness.
         if (this.agents.get(agent.key) !== entry) return;
         if (!deferred) signal.throwIfAborted();
-        const admitted = await selected?.prepare(deferred);
-        if (selected && !admitted && key !== defaultKey)
-          return selected.continueDefault(delivery, deferred);
+        const admitted = await admission(deferred);
         session = admitted?.session ?? session;
         sessionContext = admitted?.context ?? sessionContext;
         // `fresh` is for a session that has been shown nothing yet.

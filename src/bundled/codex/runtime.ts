@@ -499,8 +499,7 @@ export class CodexRuntime {
   private controlKey(agent: Agent, place: SessionPlace) {
     return JSON.stringify([
       place.channelId,
-      this.resolveConfig(agent.config).scope === "channel" &&
-      place.sessionScope !== "thread"
+      this.resolveConfig(agent.config).scope === "channel"
         ? "channel"
         : (place.root ?? "channel"),
     ]);
@@ -1639,7 +1638,7 @@ export class CodexRuntime {
     const channel = await reads.channel(channelId);
     const solo = await reads.soloChat(agent.owner, channelId, delivery.signal);
     const huddle = isHuddleRoom(channel?.about);
-    let topLevel = solo || huddle || wake?.topLevel === true;
+    const topLevel = solo || huddle || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return delivery.ignored?.();
     // Only a Solo chat's Canvas is handed over.
     const canvas = reads.canvas?.bind(reads);
@@ -1655,35 +1654,28 @@ export class CodexRuntime {
     // A stop during the reads deleted this agent's entry; recreating it would
     // reopen the agent.
     delivery.signal.throwIfAborted();
-    let toolRoot = channel?.dm || topLevel ? undefined : rootOf(event);
-    let root = settings.scope === "channel" ? undefined : toolRoot;
+    const toolRoot = channel?.dm || topLevel ? undefined : rootOf(event);
+    const root = settings.scope === "channel" ? undefined : toolRoot;
     delivery.signal.throwIfAborted();
-    let conversationKey = JSON.stringify([channelId, root ?? "channel"]);
-    const defaultKey = conversationKey;
+    const conversationKey = JSON.stringify([channelId, root ?? "channel"]);
     const sourceRoot = wake ? wake.root : rootOf(event);
-    const selected = await delivery.prepareSession?.({
-      source: {
-        channelId,
-        ...(!channel?.dm && sourceRoot ? { root: sourceRoot } : {}),
-      },
-      conversation: { channelId, ...(root ? { root } : {}) },
-    });
-    if (selected) {
-      root = selected.conversation.root;
-      if (root) {
-        toolRoot = root;
-        topLevel = false;
-      }
-      conversationKey = JSON.stringify([channelId, root ?? "channel"]);
-    }
+    const admission = (deferred: boolean) =>
+      delivery.prepareSession?.(
+        {
+          source: {
+            channelId,
+            ...(!channel?.dm && sourceRoot ? { root: sourceRoot } : {}),
+          },
+          conversation: { channelId, ...(root ? { root } : {}) },
+        },
+        deferred,
+      );
 
     if (await this.inspect?.(agent.key)) {
       const handoff = this.controls.deliver(
         `${agent.key}/${conversationKey}`,
         async (deferred) => {
-          const admitted = await selected?.prepare(deferred);
-          if (selected && !admitted && conversationKey !== defaultKey)
-            return selected.continueDefault(delivery, deferred);
+          const admitted = await admission(deferred);
           const runtime = await this.connection(
             agent.key,
             reads.scope,
@@ -1780,12 +1772,7 @@ export class CodexRuntime {
       async (deferred) => {
         if (deferred) entry.abort.signal.throwIfAborted();
         else delivery.signal.throwIfAborted();
-        const admitted = await selected?.prepare(deferred);
-        if (selected && !admitted && conversationKey !== defaultKey) {
-          entry.waiting.delete(request);
-          request.answered();
-          return selected.continueDefault(delivery, deferred);
-        }
+        const admitted = await admission(deferred);
         if (admitted) {
           request.session = admitted.session;
           if (admitted.context !== undefined)

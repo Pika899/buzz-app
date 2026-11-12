@@ -740,7 +740,7 @@ it.each([
   },
 );
 
-it("keeps an addressed Attention wake when its selected route declines", async () => {
+it("keeps an addressed Attention wake when a session association declines", async () => {
   vi.useFakeTimers({ now: 1_000_000 });
   const codex = fakeCodex();
   const root = message(owner, channel, "Task root", 999);
@@ -771,7 +771,6 @@ it("keeps an addressed Attention wake when its selected route declines", async (
     id: "decline",
     ready: async () => {},
     matches: () => true,
-    route: () => "source-thread",
     prepare,
   });
   await f.service.save(agentKey.pubkey, {
@@ -801,66 +800,66 @@ it("keeps an addressed Attention wake when its selected route declines", async (
   expect(prepare).toHaveBeenCalledOnce();
   expect(f.deliveries.map((delivery) => delivery.trigger.type)).toEqual([
     "attention",
-    "attention",
   ]);
-  expect(f.deliveries[1]?.trigger).toEqual(f.deliveries[0]?.trigger);
-  expect(f.deliveries[1]?.wakeText).toBe(f.deliveries[0]?.wakeText);
 });
 
-it("routes New through the admitted thread when the native default is channel scope", async () => {
-  const codex = fakeCodex();
-  const { seeded } = heads("buzz/codex", {
-    model: "synced-model",
-    effort: "high",
-    scope: "channel",
-  });
-  const f = await setup(
-    "codex",
-    (_relay, reads, core) =>
-      codexRun(new CodexRuntime(codex.spawn, reads, core, memoryStorage())),
-    {
-      model: "local-model",
-      effort: "low",
-      instructions: "",
-      workspace: "/this/device",
-      scope: "channel",
-    },
-    seeded,
-    synced(),
-  );
-  f.plugin.agents.registerSessionRouter({
-    id: "tasks",
-    ready: async () => {},
-    matches: () => true,
-    route: () => "source-thread",
-    prepare: async (input) => ({
-      association: input.association ?? { task: input.sessionKey },
-    }),
-  });
-  const first = f.mention();
-  const work = () =>
-    f.activity.reader.work().find((row) => row.messageId === first.id);
-  await vi.waitFor(() => expect(work()?.state).toBe("done"));
-  const prior = work()?.session?.sessionKey;
-  const agent = f.service.find(agentKey.pubkey);
-  if (!agent) throw new Error("Expected the local agent");
-  const place = { channelId: channel, root: first.id };
-  await vi.waitFor(() =>
-    expect(f.service.sessionState(agent.key, place)).toBe("idle"),
-  );
-  await f.service.session(agent.key, place, "new");
-  const next = f.mention(first.id);
-  await vi.waitFor(() =>
+it.each(["thread", "channel"] as const)(
+  "resets the association with the native %s session",
+  async (scope) => {
+    const codex = fakeCodex();
+    const { seeded } = heads("buzz/codex", {
+      model: "synced-model",
+      effort: "high",
+      scope,
+    });
+    const f = await setup(
+      "codex",
+      (_relay, reads, core) =>
+        codexRun(new CodexRuntime(codex.spawn, reads, core, memoryStorage())),
+      {
+        model: "local-model",
+        effort: "low",
+        instructions: "",
+        workspace: "/this/device",
+        scope,
+      },
+      seeded,
+      synced(),
+    );
+    f.plugin.agents.registerSessionRouter({
+      id: "tasks",
+      ready: async () => {},
+      matches: () => true,
+      prepare: async (input) => ({
+        association: input.association ?? { task: input.sessionKey },
+      }),
+    });
+    const first = f.mention();
+    const work = () =>
+      f.activity.reader.work().find((row) => row.messageId === first.id);
+    await vi.waitFor(() => expect(work()?.state).toBe("done"));
+    const prior = work()?.session?.sessionKey;
+    const agent = f.service.find(agentKey.pubkey);
+    if (!agent) throw new Error("Expected the local agent");
+    const place = { channelId: channel, root: first.id };
+    await vi.waitFor(() =>
+      expect(f.service.sessionState(agent.key, place)).toBe("idle"),
+    );
+    await f.service.session(agent.key, place, "new");
+    const next = f.mention(first.id);
+    await vi.waitFor(() =>
+      expect(
+        f.activity.reader.work().find((row) => row.messageId === next.id)
+          ?.state,
+      ).toBe("done"),
+    );
+    const current = f.activity.reader
+      .work()
+      .find((row) => row.messageId === next.id)?.session?.sessionKey;
+    expect(current).toBeTruthy();
+    expect(current).not.toBe(prior);
     expect(
-      f.activity.reader.work().find((row) => row.messageId === next.id)?.state,
-    ).toBe("done"),
-  );
-  const current = f.activity.reader
-    .work()
-    .find((row) => row.messageId === next.id)?.session?.sessionKey;
-  expect(current).toBeTruthy();
-  expect(current).not.toBe(prior);
-  expect(
-    codex.sent.filter((wire) => wire.method === "thread/start"),
-  ).toHaveLength(2);
-});
+      codex.sent.filter((wire) => wire.method === "thread/start"),
+    ).toHaveLength(2);
+  },
+);

@@ -572,38 +572,36 @@ export class PiRuntime {
     const solo =
       (await this.reads(agent.key)?.soloChat(agent.owner, channel, signal)) ??
       false;
-    let topLevel = solo || wake?.topLevel === true;
+    const topLevel = solo || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
-    let { key, source } = await this.key(
+    const { key, source } = await this.key(
       entry,
       agent.key,
       event,
       channel,
       topLevel,
     );
-    const defaultKey = key;
-    const selected = await prepareSession?.({
-      source: wake
-        ? {
+    const admission = (deferred: boolean) =>
+      prepareSession?.(
+        {
+          source: wake
+            ? {
+                channelId: channel,
+                ...(source.root && wake.root ? { root: wake.root } : {}),
+              }
+            : source,
+          conversation: {
             channelId: channel,
-            ...(source.root && wake.root ? { root: wake.root } : {}),
-          }
-        : source,
-      conversation: {
-        channelId: channel,
-        ...(key !== channel
-          ? { root: threadReference(event)?.rootId ?? event.id }
-          : {}),
-      },
-    });
-    if (selected) {
-      key = selected.conversation.root
-        ? `${channel}/${selected.conversation.root}`
-        : channel;
-      if (selected.conversation.root) topLevel = false;
-    }
+            ...(key !== channel
+              ? { root: threadReference(event)?.rootId ?? event.id }
+              : {}),
+          },
+        },
+        deferred,
+      );
+
     let session = givenSession;
     let sessionContext = givenSessionContext;
     const root = threadReference(event)?.rootId ?? event.id;
@@ -620,9 +618,7 @@ export class PiRuntime {
     const control = `${agent.key}/${key}`;
     let interrupted = false;
     const handoff = this.controls.deliver(control, async (deferred) => {
-      const admitted = await selected?.prepare(deferred);
-      if (selected && !admitted && key !== defaultKey)
-        return selected.continueDefault(delivery, deferred);
+      const admitted = await admission(deferred);
       session = admitted?.session ?? session;
       sessionContext = admitted?.context ?? sessionContext;
       await wait;
@@ -1454,9 +1450,7 @@ export class PiRuntime {
 /** The conversation key session controls in `place` act on, as `key` makes
  * it: a DM or Solo chat has no root here. */
 const controlKey = (agent: Agent, place: SessionPlace) =>
-  (config(agent.config).scope === "channel" &&
-    place.sessionScope !== "thread") ||
-  !place.root
+  config(agent.config).scope === "channel" || !place.root
     ? place.channelId
     : `${place.channelId}/${place.root}`;
 

@@ -37,42 +37,31 @@ and reported as migration errors.
 A plugin can use `ctx.agents.registerSessionRouter` to attach local data to a
 native agent session before execution. The argument type is
 `Parameters<Agents["registerSessionRouter"]>[0]` from `@buzz/author`.
-The host checks the request's authority and keeps the signed message and its
-attachments. An optional `route()` can select `"source-thread"` before the host
-selects the logical lifetime. It receives the verified `source` and the
-`defaultConversation`. It can read local keyed storage. It must not wait for
-relay publication or sidebar loading. Only the source root in the same channel
-is allowed. The host saves that route for later admissions and controls.
-Replies, history, tools, Work and typing then use that thread. A plugin can
-thus select an independent thread in Solo while the project Lead keeps its
-rootless session. With no selected route, the native scope stays in effect.
+The host verifies the request and selects the native conversation first.
+The hook receives both the source message's channel/thread and that native
+conversation. It cannot change session scope, reply placement or access.
+Solo keeps each agent's existing channel conversation. Thread-scoped agents
+keep their existing thread conversations.
 
-A router can supply `threadReplies: {allows(source), subscribe(listener)}`.
-This read-only display query can return a promise from a local keyed lookup.
-It shares `ready()` and reports changes through one collection subscription.
-`ctx.agents.canReplyInThread(source)` exposes the result for the current viewer.
-The host uses it to show the existing composer in an eligible Solo thread,
-including on a device with shared task records and no local native admission.
-It does not grant write access or execution authority. The host keeps its
-channel access guards and rejects stale query results.
-
-`ready()` opens only the plugin's local keyed storage. `matches()` selects the
-sources the plugin manages. Exactly one router can match a source. Its
-`prepare()` receives the agent, owner, harness, source, conversation, invocation ID, logical
-`sessionKey`, `intent`, `adopted`, `resumed`, saved association and abort signal.
-An owner message supplies `event`. A trusted wake has no signed event.
-A rootless wake has no source root; its synthetic ID is never a thread root.
-Returning `undefined` leaves an unassociated run unchanged.
+`ready()` opens only the plugin's local keyed storage. It must not wait for
+relay publication or sidebar loading. `matches()` selects the sources the
+plugin manages. Exactly one router can match an unassociated session.
+Its `prepare()` receives the agent, owner, harness, source, conversation,
+invocation ID, logical `sessionKey`, `intent`, `adopted`, `resumed`, saved
+association and abort signal. An owner message supplies `event`. A trusted
+wake has no signed event. A rootless wake has no source root; its synthetic
+ID is never a thread root. Returning `undefined` leaves an unassociated run
+unchanged.
 
 The result supplies JSON `association` and optional text `context`. The host
 saves the association before execution. The association stays fixed for that
 logical lifetime. `Delivery.session`, `LocalWork.session` and tool `Context.session`
 carry `{sessionKey, router, association}`. Tool arguments and prompt text cannot
 set this value. The context stays pending until the harness acknowledges a
-request. Plugins finish relay publication and sidebar updates separately.
+request. Plugins own their record meaning, task relationships, publication
+and sidebar updates. The host does not interpret the association JSON.
 
-A new thread route starts with `intent: "new"`. A first association in the
-default native scope adopts the source lifetime with `intent: "existing"` and
+A first association adopts the native lifetime with `intent: "existing"` and
 `adopted: true`. This does not prove whether the harness has a saved session.
 **New** changes the logical key and uses `intent: "new"`. Follow-ups, retries,
 restore, reconnect and Compact keep the key. A saved invocation keeps its key
@@ -81,21 +70,14 @@ session. An incomplete reset blocks admission until the owner retries New.
 The host keeps its existing execution claims. These local records do not add a
 cross-device execution guarantee.
 
-A native type opts in with `sessionAdmission: true`. It must carry
-out its authority and scope checks, then call `Delivery.prepareSession` with
-the source and native conversation before handover. The source keeps its
-physical thread root even when the default conversation is rootless. The type
-uses the returned `conversation` for its native key. It calls the returned
-`prepare()` inside its existing session-control handover callback, after New
-or Compact completes. If preparation declines a newly selected route,
-`continueDefault(delivery)` delivers the current adapted request in its default scope before
-native execution starts. An accepted saved association cannot be withdrawn.
-A channel-scoped session can include several source threads. The type carries
-the prepared session and context as `Delivery.session` and `Delivery.sessionContext`. It carries
-`Delivery.session` into its tool context and `Delivery.sessionContext` into its
-prompt. New resets the logical key inside the same control callback as the
-native reset. A failed reset blocks admission until New succeeds. Claude,
-Codex, goose and Pi implement this contract. With no router and
+A native type opts in with `sessionAdmission: true`. It performs its authority
+and scope checks, then calls `Delivery.prepareSession(placement, deferred)`
+inside its existing session-control handover callback, after New or Compact
+completes. `placement` supplies the source and the unchanged native conversation.
+The type carries the returned session into tool context and the returned context
+into its prompt. New resets the logical key inside the same control callback
+as the native reset. A failed reset blocks admission until New succeeds.
+Claude, Codex, goose and Pi implement this contract. With no router and
 no saved association, the extension adds no execution or publication work.
 
 ## Creating and changing agents from a conversation

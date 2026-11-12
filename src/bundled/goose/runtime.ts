@@ -319,9 +319,7 @@ export class GooseRuntime {
   }
   private readonly controls = new SessionControls(() => this.notify());
   private controlKey(agent: Agent, place: SessionPlace) {
-    return (config(agent.config).scope === "channel" &&
-      place.sessionScope !== "thread") ||
-      !place.root
+    return config(agent.config).scope === "channel" || !place.root
       ? place.channelId
       : `${place.channelId}/${place.root}`;
   }
@@ -446,7 +444,7 @@ export class GooseRuntime {
       channel,
       signal,
     );
-    let topLevel = solo || wake?.topLevel === true;
+    const topLevel = solo || wake?.topLevel === true;
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // `fresh` is for a session that has been shown nothing yet.
     const prompt = async (fresh: boolean, admitted?: string) => {
@@ -488,7 +486,7 @@ export class GooseRuntime {
       channels?.list().channels.find((item) => item.id === channel) ??
       channels?.get?.(channel);
     const root = threadReference(event)?.rootId ?? event.id;
-    let key =
+    const key =
       topLevel || summary?.channelType === "dm" || settings.scope === "channel"
         ? channel
         : `${channel}/${root}`;
@@ -499,20 +497,18 @@ export class GooseRuntime {
         ? { root: sourceRoot }
         : {}),
     };
-    const defaultKey = key;
-    const selected = await prepareSession?.({
-      source,
-      conversation: {
-        channelId: channel,
-        ...(key !== channel ? { root } : {}),
-      },
-    });
-    if (selected) {
-      key = selected.conversation.root
-        ? `${channel}/${selected.conversation.root}`
-        : channel;
-      if (selected.conversation.root) topLevel = false;
-    }
+    const admission = (deferred: boolean) =>
+      prepareSession?.(
+        {
+          source,
+          conversation: {
+            channelId: channel,
+            ...(key !== channel ? { root } : {}),
+          },
+        },
+        deferred,
+      );
+
     const { text: prepared, place, shown } = await prompt(false, key);
     let session = givenSession;
     let sessionContext = givenSessionContext;
@@ -524,9 +520,7 @@ export class GooseRuntime {
         // the short deadline for handing a message to the harness.
         if (this.agents.get(agent.key) !== entry) return;
         if (!deferred) signal.throwIfAborted();
-        const admitted = await selected?.prepare(deferred);
-        if (selected && !admitted && key !== defaultKey)
-          return selected.continueDefault(delivery, deferred);
+        const admitted = await admission(deferred);
         session = admitted?.session ?? session;
         sessionContext = admitted?.context ?? sessionContext;
         let noteRoot: string | undefined;

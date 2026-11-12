@@ -828,11 +828,8 @@ available rather than silently discarding it.
 ## Choosing and customizing agents
 
 - An optional plugin can attach context to a native session. Follow-ups and
-  reconnects keep that association. **New** starts another association. Replies
-  stay in the current conversation. A plugin can also select an independent
-  thread session, including in Solo. Its history, replies and session controls
-  then stay in that thread. A plugin can enable replies in its Solo task threads,
-  including on another device. The project Lead can keep its existing Solo session.
+  reconnects keep that association. **New** starts another association. Each
+  agent keeps its current conversation, reply placement and session controls.
 
 - Open an agent’s **Memory** tab and expand a memory to read it with Markdown
   formatting, including headings, lists, code, tables, and line breaks. Memory

@@ -708,21 +708,9 @@ export type Delivery<Config = unknown> = Readonly<{
       source: AgentSessionSource;
       conversation: AgentSessionSource;
     }>,
+    deferred?: boolean,
   ): Promise<
-    | Readonly<{
-        conversation: AgentSessionSource;
-        prepare(
-          deferred?: boolean,
-        ): Promise<
-          | Readonly<{ session: AgentSessionAssociation; context?: string }>
-          | undefined
-        >;
-        continueDefault(
-          delivery: Delivery<Config>,
-          deferred?: boolean,
-        ): Promise<void>;
-      }>
-    | undefined
+    Readonly<{ session: AgentSessionAssociation; context?: string }> | undefined
   >;
   /** The live route's channel; absent when the wire scope was ambiguous. */
   channelId?: string;
@@ -785,7 +773,6 @@ export type SessionControlAction = SessionAction | "interrupt";
 export type SessionPlace = Readonly<{
   channelId: string;
   root?: string;
-  sessionScope?: "thread";
 }>;
 export type SessionState = "idle" | "active" | "compacting" | "unavailable";
 export type AgentMigrationSetting = Readonly<{
@@ -1324,8 +1311,6 @@ export type NewAgent = Readonly<{
 }>;
 export type Agents = {
   registerSessionRouter(router: AgentSessionRouter): void;
-  /** Display capability for a source thread. This does not grant write access. */
-  canReplyInThread(source: AgentSessionSource): Promise<boolean>;
   registerExecution(provider: AgentExecutionProvider): void;
   /** Select the adapter while the agent is idle. This is write-once. */
   bindExecution(
@@ -2105,7 +2090,6 @@ export class AgentsService extends Service implements Agents {
     this.sessionAdmissions = createSessionAdmissions(
       ctx,
       executionStorage(storage),
-      () => this.notify(),
     );
     this.executions = createAgentExecutions(ctx, executionStorage(storage));
     this.contributions = createContributions<HostedAgentType>(ctx);
@@ -2206,7 +2190,7 @@ export class AgentsService extends Service implements Agents {
             trigger.type !== "attention")
         )
           return;
-        return this.sessionAdmissions.resolve({
+        return this.sessionAdmissions.prepare({
           agent: agent.key,
           owner: agent.owner,
           harness: agent.type,
@@ -4565,24 +4549,11 @@ export class AgentsService extends Service implements Agents {
       prior: this.rowOf(origin, pubkey)?.prior,
     });
   }
-  canReplyInThread(source: AgentSessionSource) {
-    return this.sessionAdmissions.canReply(source);
-  }
   private sessionPlace(
     agent: Agent,
     type: RegisteredAgentType,
     source: SessionPlace,
   ): SessionPlace {
-    const routed = this.sessionAdmissions.conversation(
-      agent.key,
-      agent.type,
-      source,
-    );
-    if (routed)
-      return {
-        ...routed,
-        ...(routed.root ? { sessionScope: "thread" as const } : {}),
-      };
     const summary = this.channelOf(agent, { tags: [["h", source.channelId]] });
     const whole =
       summary?.channelType === "solo" ||

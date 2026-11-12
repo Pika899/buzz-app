@@ -36,6 +36,10 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Install repository-pinned Rust toolchain
         run: ./bin/rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: personal-macos-arm64
+          cache-on-failure: true
       - name: Check formatting, types and design contracts
         run: ./bin/pnpm check
       - name: Test authentication and agent configuration
@@ -52,7 +56,7 @@ jobs:
           }));
           JS
       - name: Build ad-hoc signed Apple Silicon application
-        run: ./bin/pnpm tauri build --ci --no-sign --bundles app --target aarch64-apple-darwin --config "$RUNNER_TEMP/personal.json" -- --locked
+        run: ./bin/pnpm tauri build --ci --bundles app --target aarch64-apple-darwin --config "$RUNNER_TEMP/personal.json" -- --locked
       - name: Verify bundle and prepare download
         run: |
           set -euo pipefail

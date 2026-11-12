@@ -6438,6 +6438,81 @@ it("forgets an agent with no owner-attested profile without archiving it", async
   expect(archives.request).not.toHaveBeenCalled();
 });
 
+it("finishes deleting an interrupted creation when a strong read confirms no profile despite unknown archives", async () => {
+  const { service, native, archives, session } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  archives.unknown = true;
+  const readPage = vi.fn(async () => ({ events: [], relayCount: 0 }));
+  Object.assign(session, { readPage });
+  await service.remove(bot);
+  expect(readPage).toHaveBeenCalledWith(
+    [{ kinds: [0], authors: [bot], limit: 1, consistency: "strong" }],
+    { signal: expect.any(AbortSignal), priority: "foreground", fresh: true },
+  );
+  expect(steps).toEqual([
+    "stop",
+    "channels",
+    "unshare",
+    "record",
+    "key",
+    "forget",
+  ]);
+  expect(archives.request).not.toHaveBeenCalled();
+  expect(native.forget).toHaveBeenCalledWith(member(bot));
+  expect(service.find(bot)).toBeUndefined();
+});
+
+it.each(["present", "filtered", "failed", "aborted"] as const)(
+  "keeps the key and row when archives are unknown and the profile read is %s",
+  async (outcome) => {
+    const { service, native, archives, session, connect } = await setup();
+    await service.create({ type: "example/echo", name: "Echo" });
+    archives.unknown = true;
+    const readPage = vi.fn(async () => {
+      if (outcome === "failed") throw new Error("offline");
+      if (outcome === "aborted") connect(false);
+      return {
+        events:
+          outcome === "present"
+            ? [event("profile", { kind: 0, pubkey: bot })]
+            : [],
+        relayCount: outcome === "present" || outcome === "filtered" ? 1 : 0,
+      };
+    });
+    Object.assign(session, { readPage });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(service.remove(bot)).rejects.toThrow(
+        "Could not complete channel removal and archive confirmation",
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect(readPage).toHaveBeenCalledOnce();
+    expect(native.remove).not.toHaveBeenCalled();
+    expect(native.forget).not.toHaveBeenCalled();
+    expect(records.remove).not.toHaveBeenCalled();
+    expect(archives.request).not.toHaveBeenCalled();
+    expect(service.find(bot)?.deleting).toBe(true);
+  },
+);
+
+it("names record cleanup when deletion fails after channel and archive confirmation", async () => {
+  const { service, native } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  records.remove.mockRejectedValueOnce(new Error("relay refusal"));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await expect(service.remove(bot)).rejects.toThrow(
+      "Could not complete agent record removal",
+    );
+  } finally {
+    warn.mockRestore();
+  }
+  expect(native.remove).not.toHaveBeenCalled();
+  expect(native.forget).not.toHaveBeenCalled();
+});
+
 it("deletes nothing outside the agent's community, and leaves it stopped for Delete to run again", async () => {
   const { service, native, archives, connect } = await setup();
   await service.create({ type: "example/echo", name: "Echo" });

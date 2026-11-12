@@ -1092,6 +1092,13 @@ members, and teams with unavailable members cannot be selected; edit the team or
 refresh the choices. Adding people to a channel still requires the normal send
 confirmation. **Delete team** asks first; it doesn't delete the team's agents.
 
+Deleting a local agent stops it while Buzz confirms its removal from the
+community. A failed cleanup keeps it stopped and identifies the step that
+could not finish. If archive visibility is unavailable, Buzz can finish deleting
+an interrupted creation only after a fresh, strong relay read confirms that it
+has no published profile. An unreadable profile or an existing profile keeps
+deletion pending until the required confirmations are available.
+
 ## Optional features and limits
 
 - Plugins can add features. **Settings → Plugins → Manage plugins** controls

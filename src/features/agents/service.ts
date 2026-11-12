@@ -4698,6 +4698,7 @@ export class AgentsService extends Service implements Agents {
       throw new Error(`${unfinished} Its home community isn't connected.`);
     const here = rows.filter((member) => originOf(member.relay) === shown);
     const left: Member[] = [];
+    const failures: string[] = [];
     let offline = false;
     for (const member of [
       ...rows.filter((row) => !here.includes(row)),
@@ -4708,16 +4709,22 @@ export class AgentsService extends Service implements Agents {
       if (departed === "done") continue;
       left.push(member);
       offline ||= departed === "offline";
+      if (typeof departed === "object") failures.push(departed.step);
     }
+    const detail = failures.length
+      ? ` Could not complete ${[...new Set(failures)].join(", ")}.`
+      : "";
     if (left.length && rows.length === 1)
       throw new Error(
-        offline ? `${unfinished} Its community isn't connected.` : unfinished,
+        offline
+          ? `${unfinished} Its community isn't connected.`
+          : unfinished + detail,
       );
     if (left.length) {
       // Shows it gone from the communities it did leave.
       await refresh();
       throw new Error(
-        `${unfinished} It is still in ${left.map(hostOf).join(", ")}.`,
+        `${unfinished} It is still in ${left.map(hostOf).join(", ")}.${detail}`,
       );
     }
     for (const origin of this.listings.keys()) this.unlist(origin, pubkey);
@@ -4767,6 +4774,7 @@ export class AgentsService extends Service implements Agents {
     const { pubkey } = member;
     // Refused while another copy of the app removes it, which says so.
     await native.holdRemoval(member);
+    let step = "channel removal and archive confirmation";
     try {
       try {
         const signal = AbortSignal.any([
@@ -4774,7 +4782,9 @@ export class AgentsService extends Service implements Agents {
           AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
         ]);
         await leaveCommunity(binding.session, pubkey, signal);
+        step = "shared catalog cleanup";
         await unshare(binding.session, binding.viewer, pubkey, signal);
+        step = "agent record removal";
         await deleteAgentRecord(
           binding.session,
           binding.viewer,
@@ -4782,6 +4792,7 @@ export class AgentsService extends Service implements Agents {
           signal,
         );
         if (deleting && member.key === pubkey) {
+          step = "agent configuration cleanup";
           // Home can reconnect while another community's departure awaits,
           // before its new coordinator is up.
           const config = this.communityConfigs.get(binding.origin);
@@ -4794,7 +4805,7 @@ export class AgentsService extends Service implements Agents {
           `Agent ${member.name} did not leave ${member.relay}`,
           error,
         );
-        return "failed";
+        return { step };
       }
       await native.remove(member);
       this.setArchiveUnchecked(member.key, false);
@@ -6843,7 +6854,18 @@ async function leaveCommunity(
   signal.throwIfAborted();
   const state = archives.state(pubkey);
   // An unfinished read says nothing, least of all "not archived".
-  if (state === "unknown") throw new Error("Archive state is unknown");
+  if (state === "unknown") {
+    // An interrupted creation may have saved only its local row. There is
+    // nothing to archive when the relay confirms it has no profile. A visible
+    // empty list alone is not absence: readPage also counts filtered events.
+    const profile = await session.readPage(
+      [{ kinds: [0], authors: [pubkey], limit: 1, consistency: "strong" }],
+      { signal, priority: "foreground", fresh: true },
+    );
+    signal.throwIfAborted();
+    if (!profile.events.length && profile.relayCount === 0) return;
+    throw new Error("Archive state is unknown");
+  }
   // Without an owner-attested profile the agent is not in the directory, so
   // there is nothing to hide (and no consent path to archive it with).
   if (state === "not-archived" && (await archives.consent(pubkey, signal)))

@@ -43,7 +43,7 @@ jobs:
       - name: Check formatting, types and design contracts
         run: ./bin/pnpm check
       - name: Test authentication and agent configuration
-        run: ./bin/pnpm exec vitest run src/bundled/claude-code src/features/agents
+        run: ./bin/pnpm exec vitest run src/bundled/claude-code src/features/agents src/features/relay/session-snapshot-read.test.ts
       - name: Configure personal build without official updater
         run: |
           node --input-type=module <<'JS'

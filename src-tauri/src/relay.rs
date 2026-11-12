@@ -2113,14 +2113,26 @@ pub(crate) async fn media_download<R: tauri::Runtime>(
         .path()
         .download_dir()
         .map_err(|_| "Downloads unavailable")?;
-    let response = fetch_media(host.inner(), Some(fi.inner()), url, None)
+    save_media(host.inner(), fi.inner(), url, directory, filename).await?;
+    Ok(())
+}
+
+/// Fetches relay media `url` as `buzz-media` serves it and saves it to
+/// `directory` as `filename`, numbered if taken, returning where.
+pub(crate) async fn save_media(
+    host: &IdentityHost,
+    fi: &FederatedIdentity,
+    url: Url,
+    directory: std::path::PathBuf,
+    filename: String,
+) -> Result<std::path::PathBuf> {
+    let response = fetch_media(host, Some(fi), url, None)
         .await
         .map_err(|_| "Media download failed")?;
     let body = response.into_body();
     tauri::async_runtime::spawn_blocking(move || save_download(&directory, &filename, &body))
         .await
-        .map_err(|_| "Media download interrupted".to_owned())??;
-    Ok(())
+        .map_err(|_| "Media download interrupted".to_owned())?
 }
 
 /// Saves an agent snapshot the app built to Downloads as media is saved, and

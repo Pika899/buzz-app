@@ -1,6 +1,10 @@
 import { useActivityFocusHandoff } from "./use-activity-focus-handoff";
 import messageStyles from "./Messages.module.css";
-import { useReplacedTypers } from "../conversation/typing-presentation";
+import {
+  usePresentedAgents,
+  usePresentedRequests,
+  useReplacedTypers,
+} from "../conversation/typing-presentation";
 import { useChannelIdentityNames } from "../identity-names/react";
 import {
   useCallback,
@@ -20,9 +24,14 @@ import {
 } from "../profiles/target";
 import {
   currentActivity,
+  workingRequests,
   type CurrentActivity,
 } from "../agents/current-activity";
-import { localWorkLabel, type LocalWork } from "../agents/local-activity";
+import {
+  localWorkLabel,
+  localWorkRoot,
+  type LocalWork,
+} from "../agents/local-activity";
 import { AgentResponsePreview } from "./AgentResponsePreview";
 import { RemoteAgentHint, RemoteWorkIcon } from "./RemoteAgentHint";
 import { remoteWorkDetail } from "../agents/execution-location";
@@ -49,6 +58,18 @@ import { avatarMedia } from "../../shared/avatar-source";
 const noSubscribe = () => () => {};
 const noActivity = () => undefined;
 const noRows: readonly never[] = [];
+/** Mounted history presents every request this agent is working on here. */
+const presentsAllWork = (
+  presented: ReadonlySet<string>,
+  ...[snapshot, agent, ...scope]: Parameters<typeof workingRequests>
+) => {
+  if (!presented.size) return false;
+  const work = workingRequests(snapshot, agent, ...scope);
+  return (
+    !!work.length &&
+    work.every((ids) => ids.some((id) => presented.has(`${agent}\n${id}`)))
+  );
+};
 const sameActivity = (
   a: ReadonlyMap<string, CurrentActivity>,
   b: ReadonlyMap<string, CurrentActivity>,
@@ -97,6 +118,8 @@ export function useLiveConversationAgents(
   threadRootId: string | undefined,
   includeThreads = true,
 ): readonly string[] {
+  const presented = usePresentedAgents(session, channelId, threadRootId);
+  const presentedRequests = usePresentedRequests(session, channelId);
   const watchChannel = !threadRootId && !includeThreads;
   const subscribe = useCallback(
     (listener: () => void) => {
@@ -117,8 +140,9 @@ export function useLiveConversationAgents(
   );
   const getKey = () => {
     const entries = session.typing.snapshot();
+    const activity = (session.agentActivity?.snapshot ?? noActivity)();
     const details = currentActivity(
-      (session.agentActivity?.snapshot ?? noActivity)(),
+      activity,
       entries,
       knownAgentsOf(
         session.agentChoices.snapshot(),
@@ -130,7 +154,21 @@ export function useLiveConversationAgents(
       includeThreads,
       threadRootsOf(channelRowsOf(session, channelId, watchChannel)),
     );
-    return [...details.keys()].sort().join(",");
+    return [...details.keys()]
+      .filter(
+        (key) =>
+          !presented.has(key) &&
+          !presentsAllWork(
+            presentedRequests,
+            activity,
+            key,
+            channelId,
+            threadRootId,
+            includeThreads,
+          ),
+      )
+      .sort()
+      .join(",");
   };
   const key = useSyncExternalStore(subscribe, getKey, getKey);
   return useMemo(() => (key ? key.split(",") : []), [key]);
@@ -144,6 +182,8 @@ export function useConversationAgents(
   includeThreads = true,
 ) {
   const replaced = useReplacedTypers(session, channelId, threadRootId);
+  const presented = usePresentedAgents(session, channelId, threadRootId);
+  const presentedRequests = usePresentedRequests(session, channelId);
   const entries = useSyncExternalStore(
     session.typing.subscribe,
     session.typing.snapshot,
@@ -196,10 +236,35 @@ export function useConversationAgents(
     getDetails,
     getDetails,
   );
-  // A message may own the step details, but the conversation keeps its busy cue.
-  const agents = [...details.keys()].sort();
+  // A message's live bubble is the agent's working indicator, as is mounted
+  // history presenting every request it is working on here. Uncovered work
+  // keeps the conversation's busy cue.
+  const readCovered = () => {
+    const snapshot = (session.agentActivity?.snapshot ?? noActivity)();
+    return [...details.keys()]
+      .filter((key) =>
+        presentsAllWork(
+          presentedRequests,
+          snapshot,
+          key,
+          channelId,
+          threadRootId,
+          includeThreads,
+        ),
+      )
+      .join(",");
+  };
+  const covered = useSyncExternalStore(
+    session.agentActivity?.subscribe ?? noSubscribe,
+    readCovered,
+    readCovered,
+  );
+  const activity = (session.agentActivity?.snapshot ?? noActivity)();
+  const agents = [...details.keys()]
+    .filter((key) => !presented.has(key) && !covered.split(",").includes(key))
+    .sort();
   return {
-    activity: (session.agentActivity?.snapshot ?? noActivity)(),
+    activity,
     details,
     entries,
     replaced,
@@ -378,7 +443,7 @@ export function TypingIndicator({
     );
     const conversationRoot =
       workRoot ??
-      work?.threadRootId ??
+      (work ? localWorkRoot(work) : undefined) ??
       threadRootId ??
       (knownRoots.length === 1 ? knownRoots[0] : undefined);
     const conversation = conversationRoot

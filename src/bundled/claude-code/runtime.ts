@@ -1,3 +1,4 @@
+import { protectionTranscript } from "./protection-transcript";
 import { fileStore } from "../../features/agents/state";
 import type { AgentExecution } from "../../features/agents/execution";
 import { executionSpawn } from "./execution";
@@ -22,6 +23,7 @@ import {
   unverifiedSynced,
 } from "../../features/agents/agent-config";
 import { fromOwner, workflowOf } from "../../features/agents/owner-attestation";
+import type { TranscriptTurn } from "../../features/agents/activity-transcript";
 import type { AgentReads } from "../../features/agents/reads";
 import { localStore, type AgentStore } from "../../features/agents/store";
 import type {
@@ -52,6 +54,10 @@ import {
 } from "../../features/agent-harness/core-memory";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { readProject } from "../../features/agent-harness/project";
+import {
+  referencedFolders,
+  referencedSkills,
+} from "../../features/agent-harness/referenced-folders";
 import { SessionControls } from "../../features/agent-harness/session-control";
 import type {
   SessionPlace,
@@ -66,8 +72,8 @@ import {
   turnPrompt,
 } from "./prompt";
 import { AgentSessions, localSessions, Spare } from "./sessions";
-import { protectionHistoryEntry } from "./security";
 import {
+  readLatestTurns,
   readSessionTitle,
   readTranscript,
   type Conversation,
@@ -135,8 +141,11 @@ type Entry = {
   handle?: AgentHandle;
   /** Where each conversation's tools default to: its latest turn's thread. */
   contexts: Map<string, Context>;
-  /** The project folders each Solo chat's latest turn named, for its process. */
+  /** The folders each conversation's process may use: its Solo chat's
+   * latest Canvas folders and every folder its owner referenced. */
   directories: Map<string, readonly string[]>;
+  /** The folders each conversation's owner messages referenced. */
+  referenced: Map<string, readonly string[]>;
   /** Each conversation's latest posting policy: when its turns were handed
    * over, and when all of them settled. */
   policies: Map<
@@ -160,8 +169,8 @@ const where = ({ workspace, model, effort }: Config) => ({
 /** How Claude lists the session tools: in full up front only those marked
  * `alwaysLoad`, and the rest by name until its tool search loads them, with
  * the server's instructions saying what they are. */
-const listing = (added: readonly AddedTool[], owner = false): Listing => ({
-  instructions: sessionHint(added, owner),
+const listing = (added: readonly AddedTool[]): Listing => ({
+  instructions: sessionHint(added),
   tool: ({ load, ...tool }) =>
     load === "always"
       ? { ...tool, _meta: { "anthropic/alwaysLoad": true } }
@@ -203,13 +212,16 @@ export class ClaudeRuntime {
   >();
   /** Solo chats whose title was already offered to the host this app run. */
   private readonly titled = new Set<string>();
+  /** Counts changes of credentials, which start processes again. */
+  private credentials = 0;
   /** One process started ahead of need, for any agent's next new conversation. */
   private readonly spare = new Spare(
     (id, options) => this.spawn(id, options),
     (_conversation, message) =>
       respond(undefined, {}, message, this.added(), listing(this.added())),
     undefined,
-    () => addedKey(this.added()),
+    // A spare started with old credentials is not handed over either.
+    () => JSON.stringify([addedKey(this.added()), this.credentials]),
   );
 
   constructor(
@@ -240,6 +252,10 @@ export class ClaudeRuntime {
     private readonly target?: AgentExecution,
     private readonly targetKey?: string,
   ) {}
+
+  /** A failed turn's error as its report says it, such as where to fix
+   * Claude's credentials. */
+  explain: (error: string) => string = (error) => error;
 
   private executionKey(agent: AgentKey, conversation: string) {
     const scope = this.reads(agent)?.scope;
@@ -619,6 +635,44 @@ export class ClaudeRuntime {
         transcript && { ...transcript, turns: prompts.shown(transcript.turns) },
     );
   }
+  /** The latest whole turns of a conversation's saved session, or undefined
+   * when it has none to read that way. Its sessions' prompts are shown
+   * once: not again on a session whose earlier turns `held` keeps. */
+  async latestTurns(
+    conversation: Conversation,
+    workspace: string,
+    working: boolean,
+    signal: AbortSignal,
+    held: readonly TranscriptTurn[],
+  ) {
+    if (await this.inspect?.(conversation.agent)) return undefined;
+    const read = await readLatestTurns(
+      this.spawn,
+      workspace,
+      conversation,
+      working,
+      signal,
+      (pubkey) => this.reads(conversation.agent)?.name(pubkey),
+    );
+    if (!read) return undefined;
+    // Turns older than all `held` keeps are left.
+    const ids = new Set(held.map((turn) => turn.turnId));
+    const turns = read.slice(
+      Math.max(
+        read.findIndex((turn) => ids.has(turn.turnId)),
+        0,
+      ),
+    );
+    const at = held.findIndex((turn) => turn.turnId === turns[0]?.turnId);
+    const kept = new Set(
+      held.slice(0, Math.max(at, 0)).map((t) => t.sessionId),
+    );
+    return this.prompts(conversation.agent)
+      .shown(turns)
+      .map((turn, index) =>
+        kept.has(turn.sessionId) ? (turns[index] ?? turn) : turn,
+      );
+  }
   /** What each of the agent's sessions started with. */
   private prompts(agent: AgentKey) {
     return sessionPrompts(this.storage, "claude-code", agent);
@@ -781,6 +835,13 @@ export class ClaudeRuntime {
       }
       signal.throwIfAborted();
     });
+  }
+
+  /** The credentials changed: idle sessions stop, to start again with the new
+   * ones, and busy ones when they next fall idle. */
+  restart() {
+    this.credentials++;
+    for (const entry of this.agents.values()) entry.sessions.reconfigure();
   }
 
   dispose() {
@@ -1169,7 +1230,7 @@ export class ClaudeRuntime {
     return agent
       .publish({
         kind: 9,
-        content: `⚠️ I couldn't finish that: ${error.slice(0, 500)}`,
+        content: `⚠️ I couldn't finish that: ${this.explain(error.slice(0, 500))}`,
         tags: [
           ["h", channel],
           ...(topLevel
@@ -1261,18 +1322,38 @@ export class ClaudeRuntime {
         item.created_at > seen && (!seen || item.pubkey !== agent.pubkey),
     );
     const signingAuthority = reads?.workflowAuthority();
-    const [names, project] = await Promise.all([
+    const [names, project, folders] = await Promise.all([
       readAuthorNames(
         reads,
         [event, ...unseen.slice(-CONTEXT_LIMIT)],
         signingAuthority,
       ),
       reading,
+      referencedFolders(event, owner, reads?.scope),
     ]);
+    const referenced = [
+      ...new Set([
+        ...(entry.referenced.get(key) ?? []),
+        ...folders.directories,
+      ]),
+    ];
+    if (referenced.length) entry.referenced.set(key, referenced);
     // An unread Canvas keeps the folders the chat had, not restarting it.
-    if (project?.directories.length)
-      entry.directories.set(key, project.directories);
+    const directories = [
+      ...new Set([
+        ...(project ? project.directories : (entry.directories.get(key) ?? [])),
+        ...referenced,
+      ]),
+    ];
+    if (directories.length) entry.directories.set(key, directories);
     else if (project) entry.directories.delete(key);
+    const section = [
+      project?.section,
+      folders.section,
+      referencedSkills(event, owner, agent.pubkey),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     return {
       key,
       event,
@@ -1289,7 +1370,7 @@ export class ClaudeRuntime {
       total: earlier.length + 1,
       names,
       ...(signingAuthority ? { signingAuthority } : {}),
-      ...(project?.section ? { project: project.section } : {}),
+      ...(section ? { project: section } : {}),
     };
   }
 
@@ -1316,6 +1397,7 @@ export class ClaudeRuntime {
       contexts: new Map(),
       policies: new Map(),
       directories: new Map(),
+      referenced: new Map(),
     };
     // Each process reads files where it was started, and keeps the tool list
     // it was given, until it is replaced.
@@ -1328,12 +1410,12 @@ export class ClaudeRuntime {
           appClient(handle, {
             // Its PreToolUse hook reviews every tool, Buzz's included.
             nativeToolGate: true,
-            protectionContext: async () => {
+            captureProtectionContext: async () => {
               if (!conversation)
                 throw new Error(
                   "The native Claude conversation is unavailable",
                 );
-              return entry.sessions.protectionContext(conversation);
+              return entry.sessions.captureProtectionContext(conversation);
             },
             relayAuthor: this.reads(agent)?.relayAuthor?.(),
             signingAuthority: this.reads(agent)?.workflowAuthority(),
@@ -1350,6 +1432,7 @@ export class ClaudeRuntime {
             memories: (slug) => this.memories(agent, slug),
             remembered: () => this.forget(agent),
             signal,
+            callSignal: signal,
           });
         const context =
           (conversation && entry.contexts.get(conversation)) || {};
@@ -1358,7 +1441,7 @@ export class ClaudeRuntime {
           context,
           message,
           this.added(),
-          listing(this.added(), !!client?.ownerAccess),
+          listing(this.added()),
         );
       };
     const saved = this.savedSessions(agent);
@@ -1398,6 +1481,7 @@ export class ClaudeRuntime {
           entry.team,
           entry.name,
           addedKey(this.added()),
+          this.credentials,
         ]),
       launch: async (key) => {
         const { workspace, instructions, scope } = entry.config;
@@ -1421,26 +1505,14 @@ export class ClaudeRuntime {
             ? {
                 protection: {
                   gate,
-                  history: async (path: string, signal: AbortSignal) => {
-                    const bytes = await readFile(
+                  history: (path: string, signal: AbortSignal) =>
+                    protectionTranscript(
                       this.spawn,
                       workspace,
                       path,
                       signal,
                       gate.processProtection,
-                    );
-                    const lines = new TextDecoder().decode(bytes).split("\n");
-                    // Claude appends to its transcript as it goes, so the last
-                    // line may still be partial; the next hook reads it whole.
-                    const last = lines.pop() ?? "";
-                    const rows = lines
-                      .filter((line) => line.trim())
-                      .map((line) => JSON.parse(line) as unknown);
-                    try {
-                      if (last.trim()) rows.push(JSON.parse(last));
-                    } catch {}
-                    return rows.map(protectionHistoryEntry);
-                  },
+                    ),
                 },
               }
             : {}),

@@ -81,6 +81,7 @@ export type {
   LinkRenderer,
   MessageRenderer,
   MessageAction,
+  IdentityMark,
   TargetOpener,
 } from "../features/conversation/contracts";
 export type { RelayData, RelaySnapshot } from "../features/relay/service";
@@ -149,6 +150,7 @@ export type {
   Agents,
   AgentAddedTab,
   AgentHandle,
+  AgentInstructions,
   AgentType,
   AgentSession,
   AgentSessions,
@@ -186,6 +188,9 @@ export type {
 
 export type {
   SoloNavigation,
+  SoloWorkspaces,
+  SoloWorkspaceSnapshot,
+  SoloWorkspaceProps,
   SoloRegionBinding,
   SoloRegionSnapshot,
   SoloRegionAction,
@@ -198,6 +203,7 @@ export type {
   SoloConversationLinkProps,
   SoloCardProps,
   SoloDisclosureProps,
+  SoloDraftStart,
 } from "../features/channel-navigation/solo-navigation-contract";
 
 export type {

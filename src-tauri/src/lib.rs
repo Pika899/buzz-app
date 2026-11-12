@@ -58,6 +58,8 @@ use nsec_backup::{
 use nsec_backup_choice::{nsec_backup_choice, nsec_backup_set_choice};
 mod claude_key;
 mod clipboard;
+#[cfg(any(target_os = "macos", test))]
+mod gpu_reaper;
 mod jev;
 mod keep_awake;
 #[cfg(target_os = "macos")]
@@ -1014,6 +1016,8 @@ pub fn run() {
             mouse_nav::install(app.handle());
             #[cfg(target_os = "macos")]
             reshow::install(app.handle());
+            #[cfg(target_os = "macos")]
+            gpu_reaper::install(app.handle());
             #[cfg(target_os = "macos")]
             if let Some(home) = dirs::home_dir() {
                 if let Err(error) = legacy_cli_shortcut::remove_stale(&home.join(".local/bin")) {

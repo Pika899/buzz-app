@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     name: Test and build Apple Silicon app
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 120
     env:
       CI: "true"

@@ -19,17 +19,9 @@ Watch the full-quality video at [buzz.xyz](https://buzz.xyz/#demo).
 
 ### 1. Download
 
-Get the newest build from the [releases page](https://github.com/block/buzz-app/releases).
-
-| Platform | Download | Notes |
-| --- | --- | --- |
-| macOS (Apple Silicon) | `Buzz_…_aarch64.dmg` | Signed and notarized. |
-| macOS (Intel) | `Buzz_…_x64.dmg` | Signed and notarized. |
-| Windows (x64) | `Buzz_…_x64_unsigned.exe` | Not code-signed, so Windows SmartScreen warns you before it runs. |
-| Linux (x64) | `Buzz_…_amd64.deb` or `Buzz_…_x86_64.AppImage` | Built on Ubuntu 24.04. |
-
-Once installed, Buzz updates itself. You can also check from
-**Settings → Software updates**.
+Download the latest release from [buzz.xyz](https://buzz.xyz) or see
+[all releases](https://github.com/block/buzz-app/releases). Available for
+macOS, Windows and Linux.
 
 ### 2. Set up your identity
 

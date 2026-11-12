@@ -124,9 +124,28 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
       const candidates = routers.snapshot();
       await Promise.all(candidates.map((router) => router.ready()));
       check(input.signal);
+      const invocationKey =
+        SESSION_ADMISSION_PREFIX +
+        JSON.stringify([
+          "invocation",
+          input.agent,
+          input.harness,
+          input.invocationId,
+        ]);
       const pointerText = await storage.read(pointerKey);
       const existing =
         pointerText === null ? undefined : parse<Pointer>(pointerText);
+      if (existing) {
+        if (!existing.sessionKey || existing.resetting)
+          throw new Error(
+            "The agent session reset is incomplete. Use New again before sending a message.",
+          );
+        const receipt = await storage.read(invocationKey);
+        if (receipt !== null && parse<string>(receipt) !== existing.sessionKey)
+          throw new Error(
+            "This request belongs to an earlier session. Send a new message to continue.",
+          );
+      }
       const savedText = existing
         ? await storage.read(savedKey(existing.sessionKey))
         : null;
@@ -156,14 +175,6 @@ export function createSessionAdmissions(root: Context, storage: AgentStore) {
         throw new Error(
           "The agent session reset is incomplete. Use New again before sending a message.",
         );
-      const invocationKey =
-        SESSION_ADMISSION_PREFIX +
-        JSON.stringify([
-          "invocation",
-          input.agent,
-          input.harness,
-          input.invocationId,
-        ]);
       const sessionKey = parse<string>(
         await storage.add(invocationKey, JSON.stringify(pointer.sessionKey)),
       );

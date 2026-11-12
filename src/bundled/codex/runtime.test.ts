@@ -5847,6 +5847,7 @@ it.each(["plugin", "attention"] as const)(
     const f = fixture();
     if (type === "plugin") f.soloChannels.add("channel");
     const delivery = pluginWake(f);
+    const acknowledged = vi.fn();
     if (delivery.trigger.type !== "plugin")
       throw new Error("Expected plugin wake");
     f.snapshot.session.canvas.available = true;
@@ -5855,6 +5856,7 @@ it.each(["plugin", "attention"] as const)(
     );
     await f.runtime.run({
       ...delivery,
+      acknowledged,
       trigger:
         type === "attention"
           ? { ...delivery.trigger, type: "attention", topLevel: true }
@@ -5871,6 +5873,7 @@ it.each(["plugin", "attention"] as const)(
       },
     });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await vi.waitFor(() => expect(acknowledged).toHaveBeenCalledOnce());
     const input = JSON.stringify(f.starts()[0]?.params);
     if (type === "attention") {
       expect(input).not.toContain("<plugin-wake");

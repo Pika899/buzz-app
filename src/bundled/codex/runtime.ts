@@ -2098,12 +2098,13 @@ export class CodexRuntime {
    * success. Watches have no bubble; mentions in other threads keep theirs,
    * and a top-level chat is one scope. */
   private acknowledgeActivity(active: Active, request: Request) {
-    if (!request.step) return;
-    const scope = request.activityScope;
-    const prior = active.activity.get(scope);
-    if (prior === request) return;
-    prior?.superseded?.();
-    active.activity.set(scope, request);
+    if (request.step) {
+      const scope = request.activityScope;
+      const prior = active.activity.get(scope);
+      if (prior === request) return;
+      prior?.superseded?.();
+      active.activity.set(scope, request);
+    }
     request.acknowledged?.();
   }
 

@@ -120,7 +120,8 @@ it("leaves declined native sessions unchanged and preserves an accepted associat
 });
 
 it("defers admission during New and rejects replay from the retired lifetime", async () => {
-  const f = await setup();
+  const matches = vi.fn(() => true);
+  const f = await setup({ matches });
   const first = await f.admissions.prepare(request("first"));
   const controls = new SessionControls(() => {});
   const nativeReset = gate();
@@ -142,23 +143,28 @@ it("defers admission during New and rejects replay from the retired lifetime", a
   nativeReset.resolve();
   await reset;
   await handoff.done;
+  await f.admissions.reset(agent, "example/native", source, async () => {});
+  matches.mockReturnValue(false);
   await expect(f.admissions.prepare(request("first"))).rejects.toThrow(
     "earlier session",
   );
 });
 
 it("blocks admission after a failed reset until New completes", async () => {
-  const f = await setup();
+  const matches = vi.fn(() => true);
+  const f = await setup({ matches });
   await f.admissions.prepare(request("first"));
   await expect(
     f.admissions.reset(agent, "example/native", source, async () => {
       throw new Error("Reset cancelled");
     }),
   ).rejects.toThrow("Reset cancelled");
+  matches.mockReturnValue(false);
   await expect(f.admissions.prepare(request("after-failure"))).rejects.toThrow(
     "reset is incomplete",
   );
   await f.admissions.reset(agent, "example/native", source, async () => {});
+  matches.mockReturnValue(true);
   const next = await f.admissions.prepare(request("after-recovery"));
   expect(next?.session.sessionKey).toBeTruthy();
 });

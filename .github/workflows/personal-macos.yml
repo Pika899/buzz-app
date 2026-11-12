@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 120
     env:
       CI: "true"
+      BUZZ_TEST_WORKERS: "2"
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_RELEASE_DEBUG: "0"

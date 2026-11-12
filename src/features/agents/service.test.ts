@@ -6493,7 +6493,9 @@ it.each(["present", "filtered", "failed", "aborted"] as const)(
     expect(native.forget).not.toHaveBeenCalled();
     expect(records.remove).not.toHaveBeenCalled();
     expect(archives.request).not.toHaveBeenCalled();
-    expect(service.find(bot)?.deleting).toBe(true);
+    expect(await native.list()).toMatchObject([
+      { pubkey: bot, deleted: false, deleting: true },
+    ]);
   },
 );
 

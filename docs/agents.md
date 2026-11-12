@@ -77,7 +77,7 @@ completes. `placement` supplies the source and the unchanged native conversation
 The type carries the returned session into tool context and the returned context
 into its prompt. New resets the logical key inside the same control callback
 as the native reset. A failed reset blocks admission until New succeeds.
-Claude, Codex, goose and Pi implement this contract. With no router and
+Claude and Codex implement this contract. With no router and
 no saved association, the extension adds no execution or publication work.
 
 ## Creating and changing agents from a conversation

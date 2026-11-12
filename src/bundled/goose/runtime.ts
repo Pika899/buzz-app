@@ -336,7 +336,6 @@ export class GooseRuntime {
     agent: Agent,
     place: SessionPlace,
     action: SessionControlAction,
-    reset?: (change: () => Promise<void>) => Promise<void>,
   ) {
     const key = this.controlKey(agent, place);
     const control = `${agent.key}/${key}`;
@@ -351,12 +350,9 @@ export class GooseRuntime {
       throw new Error("Wait for the active turn to finish first.");
     return this.controls.run(control, action, async (signal) => {
       signal.throwIfAborted();
-      const change = async () => {
-        const result = await entry.sessions.reset(key, action);
-        signal.throwIfAborted();
-        if (!result.ok) throw new Error(result.error);
-      };
-      await (action === "new" && reset ? reset(change) : change());
+      const result = await entry.sessions.reset(key, action);
+      signal.throwIfAborted();
+      if (!result.ok) throw new Error(result.error);
     });
   }
 
@@ -370,30 +366,26 @@ export class GooseRuntime {
     this.agents.clear();
   }
 
-  async run(delivery: Delivery) {
-    const {
-      trigger,
-      agent,
-      config: raw,
-      channelId,
-      team,
-      model,
-      effort,
-      synced,
-      workingUntil,
-      current,
-      wakeText,
-      ignored,
-      signal,
-      step,
-      acknowledged,
-      superseded,
-      interruptible,
-      named,
-      session: givenSession,
-      sessionContext: givenSessionContext,
-      prepareSession,
-    } = delivery;
+  async run({
+    trigger,
+    agent,
+    config: raw,
+    channelId,
+    team,
+    model,
+    effort,
+    synced,
+    workingUntil,
+    current,
+    wakeText,
+    ignored,
+    signal,
+    step,
+    acknowledged,
+    superseded,
+    interruptible,
+    named,
+  }: Delivery) {
     const settings = config(raw);
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
     if (
@@ -479,39 +471,7 @@ export class GooseRuntime {
         text: resumed ? `${text}\n\n${RESUMED_PROMPT}` : text,
       };
     };
-    const snapshot = this.relay(agent.key)?.snapshot();
-    const channels =
-      snapshot?.status === "ready" ? snapshot.session.channels : undefined;
-    const summary =
-      channels?.list().channels.find((item) => item.id === channel) ??
-      channels?.get?.(channel);
-    const root = threadReference(event)?.rootId ?? event.id;
-    const key =
-      topLevel || summary?.channelType === "dm" || settings.scope === "channel"
-        ? channel
-        : `${channel}/${root}`;
-    const sourceRoot = wake ? wake.root : root;
-    const source = {
-      channelId: channel,
-      ...(summary?.channelType !== "dm" && sourceRoot
-        ? { root: sourceRoot }
-        : {}),
-    };
-    const admission = (deferred: boolean) =>
-      prepareSession?.(
-        {
-          source,
-          conversation: {
-            channelId: channel,
-            ...(key !== channel ? { root } : {}),
-          },
-        },
-        deferred,
-      );
-
-    const { text: prepared, place, shown } = await prompt(false, key);
-    let session = givenSession;
-    let sessionContext = givenSessionContext;
+    const { key, text: prepared, place, shown } = await prompt(false);
     signal.throwIfAborted();
     const handoff = this.controls.deliver(
       `${agent.key}/${key}`,
@@ -520,9 +480,6 @@ export class GooseRuntime {
         // the short deadline for handing a message to the harness.
         if (this.agents.get(agent.key) !== entry) return;
         if (!deferred) signal.throwIfAborted();
-        const admitted = await admission(deferred);
-        session = admitted?.session ?? session;
-        sessionContext = admitted?.context ?? sessionContext;
         let noteRoot: string | undefined;
         let notes: ReturnType<NonNullable<AgentHandle["notes"]>> = [];
         const prior = entry.policies.get(key);
@@ -543,31 +500,23 @@ export class GooseRuntime {
               ? undefined
               : (threadReference(event)?.rootId ?? event.id);
           notes = agent.notes?.(channel, noteRoot) ?? [];
-          const text = [
-            sessionContext,
-            this.review(
-              entry,
-              wait ? (await prompt(false, key)).text : prepared,
-              notes,
-            ),
-          ]
-            .filter(Boolean)
-            .join("\n\n");
+          const text = this.review(
+            entry,
+            wait ? (await prompt(false, key)).text : prepared,
+            notes,
+          );
           if (interrupted || this.agents.get(agent.key) !== entry) {
             delivered = Promise.resolve({ ok: true, undelivered: true });
             return;
           }
-          entry.contexts.set(key, {
-            ...(session ? { session } : {}),
-            ...(topLevel
+          entry.contexts.set(
+            key,
+            topLevel
               ? { channel, ...(solo ? { topLevel } : {}) }
               : key === channel
                 ? { channel }
-                : {
-                    channel,
-                    root: threadReference(event)?.rootId ?? event.id,
-                  }),
-          });
+                : { channel, root: threadReference(event)?.rootId ?? event.id },
+          );
           delivered = entry.sessions.deliver(key, text, shown, {
             ...(wake
               ? {
@@ -578,18 +527,13 @@ export class GooseRuntime {
                       (await prompt(fresh, key)).text,
                       notes,
                     );
-                    return [sessionContext, text].filter(Boolean).join("\n\n");
+                    return text;
                   },
                 }
               : {}),
             steer: steerPrompt(text),
             fresh: async () =>
-              [
-                sessionContext,
-                this.review(entry, (await prompt(true, key)).text, notes),
-              ]
-                .filter(Boolean)
-                .join("\n\n"),
+              this.review(entry, (await prompt(true, key)).text, notes),
             title: sessionTitle(entry.name, place, key.split("/")[1]),
             // A Solo chat takes the name goose gives its first session.
             ...(solo && named ? { named } : {}),

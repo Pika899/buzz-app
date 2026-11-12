@@ -11,7 +11,6 @@ export const gooseRun = (
   runtime: GooseRuntime,
 ): Pick<
   AgentType<Config>,
-  | "sessionAdmission"
   | "sessionControls"
   | "run"
   | "runOnce"
@@ -20,12 +19,10 @@ export const gooseRun = (
   | "resumes"
   | "readFile"
 > => ({
-  sessionAdmission: true,
   sessionControls: {
     scope: (agent) => config(agent.config).scope,
     state: (agent, place) => runtime.sessionState(agent, place),
-    run: (agent, place, action, reset) =>
-      runtime.session(agent, place, action, reset),
+    run: (agent, place, action) => runtime.session(agent, place, action),
     subscribe: (listener) => runtime.subscribe(listener),
   },
   run: (delivery) => runtime.run(delivery),

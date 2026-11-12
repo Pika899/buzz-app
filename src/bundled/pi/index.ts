@@ -151,12 +151,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
         component: ActivityTab,
       },
     ],
-    sessionAdmission: true,
     sessionControls: {
       scope: (agent) => config(agent.config).scope,
       state: (agent, place) => runtime.sessionState(agent, place),
-      run: (agent, place, action, reset) =>
-        runtime.session(agent, place, action, reset),
+      run: (agent, place, action) => runtime.session(agent, place, action),
       subscribe: (listener) => runtime.subscribe(listener),
     },
     models: (agent) => runtime.models(agent),
